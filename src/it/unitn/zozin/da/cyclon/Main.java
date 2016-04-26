@@ -17,6 +17,7 @@ public class Main {
 
 		PatternsCS.ask(control, config, 10000).thenAccept((report) -> {
 			System.out.println("Report " + report);
+			s.terminate();
 		});
 	}
 }

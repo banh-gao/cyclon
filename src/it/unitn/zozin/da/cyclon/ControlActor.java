@@ -7,6 +7,7 @@ import it.unitn.zozin.da.cyclon.task.TaskMessage.ReportMessage;
 import akka.actor.ActorPath;
 import akka.actor.ActorRef;
 import akka.actor.ActorSelection;
+import akka.actor.PoisonPill;
 import akka.actor.UntypedActor;
 import akka.pattern.PatternsCS;
 
@@ -36,6 +37,7 @@ class ControlActor extends UntypedActor {
 	private void runSimulationRound() {
 		if (remainingRounds == 0) {
 			System.out.println("FINISH");
+			getContext().parent().tell(PoisonPill.getInstance(), getSelf());
 			sender.tell(result, getSelf());
 			return;
 		}
@@ -90,8 +92,8 @@ class ControlActor extends UntypedActor {
 	public static class Configuration {
 
 		// Simulation params
-		int NODES = 3;
-		int ROUNDS = 2;
+		int NODES = 1;
+		int ROUNDS = 1;
 		int NODE_ADD = 0;
 		int NODE_REM = 0;
 

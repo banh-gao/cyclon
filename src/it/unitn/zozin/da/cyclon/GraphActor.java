@@ -9,6 +9,10 @@ import akka.actor.UntypedActor;
 
 public class GraphActor extends UntypedActor {
 
+	// Cyclon parameter
+	public static final int CACHE_SIZE = 3;
+	public static final int SHUFFLE_LENGTH = 2;
+
 	// Task processing state
 	private int pendingNodes = 0;
 	private ActorRef taskSender;
@@ -29,11 +33,6 @@ public class GraphActor extends UntypedActor {
 
 	private void handleControlMessage(ControlMessage message) {
 		message.execute(this);
-		addNode();
-	}
-
-	private void addNode() {
-
 	}
 
 	/**
@@ -82,7 +81,7 @@ public class GraphActor extends UntypedActor {
 
 		@Override
 		public void execute(GraphActor g) {
-			g.getContext().actorOf(Props.create(NodeActor.class));
+			g.getContext().actorOf(Props.create(NodeActor.class, CACHE_SIZE, SHUFFLE_LENGTH));
 		}
 
 	}
