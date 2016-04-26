@@ -92,7 +92,7 @@ class ControlActor extends UntypedActor {
 	public static class Configuration {
 
 		// Simulation params
-		int NODES = 1;
+		int NODES = 4;
 		int ROUNDS = 1;
 		int NODE_ADD = 0;
 		int NODE_REM = 0;

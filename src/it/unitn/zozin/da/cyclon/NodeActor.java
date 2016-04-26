@@ -3,18 +3,23 @@ package it.unitn.zozin.da.cyclon;
 import it.unitn.zozin.da.cyclon.NeighborsCache.Neighbor;
 import it.unitn.zozin.da.cyclon.task.TaskMessage;
 import it.unitn.zozin.da.cyclon.task.TaskMessage.ReportMessage;
-import java.util.ArrayList;
 import java.util.Collections;
-import java.util.List;
+import akka.actor.ActorIdentity;
+import akka.actor.ActorRef;
+import akka.actor.Identify;
 import akka.actor.UntypedActor;
 
 public class NodeActor extends UntypedActor {
 
-	private boolean isBootCompleted = false;
+	// TODO: state for testing using simple boot
+	private int pendingBootNeighbors;
+	// ////////////////////////////////////////////
+
 	private NeighborsCache cache;
 
 	public NodeActor(int cacheSize, int shuffleLength) {
 		this.cache = new NeighborsCache(cacheSize, shuffleLength);
+		this.pendingBootNeighbors = cacheSize;
 	}
 
 	@Override
@@ -23,43 +28,41 @@ public class NodeActor extends UntypedActor {
 			getSender().tell(new ReportMessage(((TaskMessage) message).map(this)), getSelf());
 		else if (message instanceof CyclonMessage)
 			processCyclonMsg((CyclonMessage) message);
+		else if (message instanceof ActorIdentity) {
+			// TODO: Implement cyclon join protocol
+			if (pendingBootNeighbors == 0)
+				return; // Boot completed: ignore other identities
+
+			ActorRef remoteActor = ((ActorIdentity) message).getRef();
+
+			// Ignore self identity
+			if (remoteActor.equals(getSelf()))
+				return;
+
+			this.cache.addNeighbors(Collections.singletonList(new Neighbor(0, remoteActor)), Collections.emptyList());
+			pendingBootNeighbors--;
+			if (pendingBootNeighbors == 0) {
+				sendCyclonRequest();
+			}
+		}
 	}
 
 	public void sendCyclonRequest() {
-		if (!isBootCompleted)
+		if (pendingBootNeighbors > 0) {
 			performBoot();
+			return;
+		}
 
-		List<Neighbor> req = new ArrayList<Neighbor>();
-
-		req.add(new Neighbor(0, "n1"));
-		req.add(new Neighbor(0, "n2"));
-		// req.add(new Neighbor(0, "n3"));
-
-		System.out.println(cache);
-		cache.addNeighbors(req, Collections.emptyList());
-
-		System.out.println(cache);
-
-		cache.increaseNeighborsAge();
-		System.out.println("REQ SENT: " + cache);
-
-		List<Neighbor> ans = new ArrayList<Neighbor>();
-
-		ans.add(new Neighbor(0, "n5"));
-		ans.add(new Neighbor(0, "n6"));
-
-		System.out.println("ANS: " + ans);
-
-		cache.addNeighbors(ans, req);
-		System.out.println("MERGE: " + cache);
-
-		System.out.println(cache.getOldestNeighbor());
+		System.out.println("SENDING CYCLON REQUEST TO " + cache.getOldestNeighbor());
+		System.out.println("SHUFFLED: " + cache.getRandomNeighbors());
 		// TODO: send request to neighbor
 	}
 
 	private void performBoot() {
-		getContext().actorSelection("../*");
-		// TODO: implement boot process
+		System.out.println("BOOTING NODE");
+		getContext().actorSelection("../*").tell(new Identify(null), getSelf());
+
+		// TODO: implement cyclon join protocol
 	}
 
 	private void processCyclonMsg(CyclonMessage message) {

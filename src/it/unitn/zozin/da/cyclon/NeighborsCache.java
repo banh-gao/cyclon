@@ -3,11 +3,10 @@ package it.unitn.zozin.da.cyclon;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
-import java.util.Set;
+import akka.actor.ActorRef;
 
 public class NeighborsCache {
 
@@ -37,22 +36,16 @@ public class NeighborsCache {
 		return neighbors.get(neighbors.size() - 1);
 	}
 
-	public Set<Neighbor> getRandomNeighbors() {
-		Set<Neighbor> out = new HashSet<Neighbor>();
+	public List<Neighbor> getRandomNeighbors() {
+		List<Neighbor> out = new ArrayList<Neighbor>(neighbors);
+
+		out.remove(getOldestNeighbor());
+
+		Collections.shuffle(out, rand);
+
+		out = out.subList(0, Math.min(shuffleLength, neighbors.size()) - 1);
+
 		out.add(getOldestNeighbor());
-
-		int neighborsNum = Math.max(shuffleLength, neighbors.size()) - 1;
-
-		Set<Integer> randIndexes = new HashSet<Integer>(neighborsNum);
-		for (int i = 0; i < neighborsNum; i++) {
-			while (!randIndexes.add(rand.nextInt(neighbors.size())));
-		}
-
-		int i = 0;
-		for (Neighbor n : neighbors) {
-			if (randIndexes.contains(i++))
-				out.add(n);
-		}
 
 		return out;
 	}
@@ -83,9 +76,9 @@ public class NeighborsCache {
 	public static class Neighbor implements Comparable<Neighbor> {
 
 		Integer age;
-		String address;
+		ActorRef address;
 
-		public Neighbor(Integer age, String address) {
+		public Neighbor(int age, ActorRef address) {
 			this.age = age;
 			this.address = address;
 		}
