@@ -3,7 +3,6 @@ package it.unitn.zozin.da.cyclon;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
 import akka.actor.ActorRef;
@@ -30,42 +29,57 @@ public class NeighborsCache {
 	}
 
 	public Neighbor getOldestNeighbor() {
-		Collections.sort(neighbors);
-		return neighbors.get(neighbors.size() - 1);
+		Neighbor oldest = neighbors.get(0);
+		for (int i = 1; i < neighbors.size(); i++)
+			if (neighbors.get(i).age > oldest.age)
+				oldest = neighbors.get(i);
+
+		return oldest;
 	}
 
-	public List<Neighbor> getRandomNeighbors(int length) {
+	public List<Neighbor> getRandomNeighbors(int shuffleLength) {
+		return getRandomNeighbors(shuffleLength, null);
+	}
+
+	public List<Neighbor> getRandomNeighbors(int shuffleLength, Neighbor exclude) {
 		List<Neighbor> out = new ArrayList<Neighbor>(neighbors);
-		out.remove(getOldestNeighbor());
+		if (exclude != null)
+			out.remove(exclude);
+
 		Collections.shuffle(out, rand);
+
 		if (out.size() > 1)
-			out = out.subList(0, Math.min(length, out.size()) - 1);
-		out.add(getOldestNeighbor());
+			out = out.subList(0, Math.min(shuffleLength, out.size()));
 		return out;
 	}
 
-	public void addNeighbors(Collection<Neighbor> newNeighbors, List<Neighbor> neighborsInRequest) {
-		newNeighbors = new ArrayList<Neighbor>(newNeighbors);
-		Iterator<Neighbor> i = newNeighbors.iterator();
+	public void updateNeighbors(Collection<Neighbor> newNeighbors, List<Neighbor> candidatesForReplacement) {
+		candidatesForReplacement = new ArrayList<Neighbor>(candidatesForReplacement);
 
-		// Fill the cache first
-		while (this.neighbors.size() < MAX_SIZE && i.hasNext()) {
-			this.neighbors.add(i.next());
-			i.remove();
-		}
+		System.out.println("NEW: " + newNeighbors.size() + " FREE SLOTS: " + (MAX_SIZE - neighbors.size()) + " REPLACEABLE: " + candidatesForReplacement.size());
 
-		// Save remaining new neighbor by replace all neighbors sent in request,
-		// replacing old ones first
-		while (!neighborsInRequest.isEmpty() && i.hasNext()) {
-			Neighbor last = neighborsInRequest.remove(0);
-			if (!this.neighbors.remove(last))
-				this.neighbors.remove(getOldestNeighbor());
+		if (MAX_SIZE - neighbors.size() + candidatesForReplacement.size() == 0)
+			throw new IllegalStateException("NEW: " + newNeighbors.size() + " FREE SLOTS: " + (MAX_SIZE - neighbors.size()) + " REPLACEABLE: " + candidatesForReplacement.size());
 
-			if (this.neighbors.add(i.next()))
-				i.remove();
+		for (Neighbor newNeighbor : newNeighbors) {
+			// If the cache is full, remove a candidate neighbor before
+			// inserting the new one
+			if (this.neighbors.size() == MAX_SIZE) {
+				Neighbor last = candidatesForReplacement.remove(0);
+				if (!this.neighbors.remove(last))
+					throw new IllegalStateException(last + " NOT CONTAINED!");
+			}
+
+			this.neighbors.add(newNeighbor);
 		}
 
 		assert (newNeighbors.isEmpty());
+		assert (neighbors.size() <= MAX_SIZE);
+	}
+
+	@Override
+	public String toString() {
+		return "NeighborsCache " + neighbors;
 	}
 
 	public static class Neighbor implements Comparable<Neighbor> {
@@ -115,12 +129,7 @@ public class NeighborsCache {
 
 	}
 
-	@Override
-	public String toString() {
-		return "NeighborsCache " + neighbors;
-	}
-
-	public void remove(Neighbor node) {
-		while (neighbors.remove(node));
+	public int size() {
+		return neighbors.size();
 	}
 }

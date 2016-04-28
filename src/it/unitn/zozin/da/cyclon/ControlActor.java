@@ -31,6 +31,7 @@ class ControlActor extends UntypedActor {
 
 	private void runSimulationRound() {
 		if (remainingRounds == 0) {
+			sender.tell(new StatusMessage(), getSelf());
 			// TODO: terminate simulation
 			return;
 		}
@@ -92,7 +93,7 @@ class ControlActor extends UntypedActor {
 
 		// Simulation params
 		int NODES = 10;
-		int ROUNDS = 4;
+		int ROUNDS = 1;
 		int NODE_ADD = 0;
 		int NODE_REM = 0;
 	}
