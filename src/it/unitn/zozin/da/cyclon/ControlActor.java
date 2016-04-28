@@ -1,7 +1,7 @@
 package it.unitn.zozin.da.cyclon;
 
-import it.unitn.zozin.da.cyclon.GraphActor.ControlMessage.StatusMessage;
 import it.unitn.zozin.da.cyclon.GraphActor.StartRoundMessage;
+import it.unitn.zozin.da.cyclon.Message.StatusMessage;
 import akka.actor.ActorPath;
 import akka.actor.ActorRef;
 import akka.actor.ActorSelection;
@@ -65,15 +65,9 @@ class ControlActor extends UntypedActor {
 			runSimulationRound();
 			return;
 		}
-		ActorSelection g = getContext().actorSelection(GRAPH);
+		// ActorSelection g = getContext().actorSelection(GRAPH);
 		// PatternsCS.ask(g, new MeasuringTask(),
 		// 1000).thenAccept(this::aggregateMeasures);
-	}
-
-	private void aggregateMeasures(Object msg) {
-		// Result res = (Result) ((ReportMessage) msg).value;
-		// System.out.println("Aggregating rounds " + res);
-		runSimulationRound();
 	}
 
 	@Override

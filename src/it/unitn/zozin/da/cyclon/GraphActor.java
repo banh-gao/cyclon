@@ -1,8 +1,7 @@
 package it.unitn.zozin.da.cyclon;
 
-import it.unitn.zozin.da.cyclon.GraphActor.ControlMessage.StatusMessage;
-import it.unitn.zozin.da.cyclon.task.MeasureMessage;
-import it.unitn.zozin.da.cyclon.task.MeasureMessage.ReportMessage;
+import it.unitn.zozin.da.cyclon.Message.ControlMessage;
+import it.unitn.zozin.da.cyclon.Message.StatusMessage;
 import akka.actor.ActorRef;
 import akka.actor.PoisonPill;
 import akka.actor.Props;
@@ -13,8 +12,6 @@ public class GraphActor extends UntypedActor {
 	// Task processing state
 	private int pendingNodes = 0;
 	private ActorRef taskSender;
-	private MeasureMessage task;
-	private Object partial;
 
 	@Override
 	public void onReceive(Object message) throws Exception {
@@ -22,10 +19,6 @@ public class GraphActor extends UntypedActor {
 			handleControlMessage((ControlMessage) message);
 		else if (message instanceof StatusMessage)
 			handleStatusMessage((StatusMessage) message);
-		else if (message instanceof MeasureMessage)
-			handleMeasureMessage((MeasureMessage) message);
-		else if (message instanceof ReportMessage)
-			handleReportMessage((ReportMessage) message);
 		else
 			throw new IllegalStateException("Unknown message type " + message.getClass());
 	}
@@ -41,63 +34,15 @@ public class GraphActor extends UntypedActor {
 		message.execute(this);
 	}
 
-	/**
-	 * Task messages are sent to all nodes to be executed in parallel
-	 * 
-	 * @param message
-	 */
-	private void handleMeasureMessage(MeasureMessage message) {
-		if (pendingNodes > 0)
-			return;
-
-		partial = null;
-
-		taskSender = getSender();
-		task = message;
-
-		System.out.println("STARTING GRAPH TASK " + message);
-
-		for (ActorRef c : getContext().getChildren())
-			pendingNodes++;
-
-		for (ActorRef c : getContext().getChildren())
-			c.tell(message, getSelf());
-	}
-
-	/**
-	 * Report messages from nodes are reduced.
-	 * When all reports are arrived the final result is sent to the task sender
-	 * 
-	 * @param message
-	 */
-	@SuppressWarnings("unchecked")
-	private void handleReportMessage(ReportMessage message) {
-		pendingNodes--;
-		partial = task.reduce(message.value, partial);
-
-		if (pendingNodes == 0)
-			taskSender.tell(new ReportMessage(partial), getSelf());
-	}
-
-	interface ControlMessage {
-
-		void execute(UntypedActor a);
-
-		class StatusMessage {
-
-		}
-	}
-
-	public static class AddNodeMessage implements ControlMessage {
+	public static class AddNodeMessage extends ControlMessage {
 
 		@Override
 		public void execute(UntypedActor a) {
 			((GraphActor) a).getContext().actorOf(Props.create(NodeActor.class));
 		}
-
 	}
 
-	public static class RemoveNodeMessage implements ControlMessage {
+	public static class RemoveNodeMessage extends ControlMessage {
 
 		@Override
 		public void execute(UntypedActor a) {
@@ -105,17 +50,16 @@ public class GraphActor extends UntypedActor {
 		}
 	}
 
-	public static class StartRoundMessage implements ControlMessage {
+	public static class StartRoundMessage extends ControlMessage {
 
 		@Override
 		public void execute(UntypedActor a) {
 			if (a instanceof GraphActor) {
 				GraphActor g = (GraphActor) a;
-				for (ActorRef c : g.getContext().getChildren())
+				for (ActorRef c : g.getContext().getChildren()) {
 					g.pendingNodes++;
-
-				for (ActorRef c : g.getContext().getChildren())
 					c.tell(this, g.getSelf());
+				}
 			} else
 				((NodeActor) a).startProtocolRound();
 		}

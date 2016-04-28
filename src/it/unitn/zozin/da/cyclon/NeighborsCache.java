@@ -51,22 +51,23 @@ public class NeighborsCache {
 		return out.subList(0, Math.min(shuffleLength, out.size()));
 	}
 
-	public void updateNeighbors(Collection<Neighbor> newNeighbors, List<Neighbor> candidatesForReplacement, NodeActor node) {
-		candidatesForReplacement = new ArrayList<Neighbor>(candidatesForReplacement);
+	public void updateNeighbors(Collection<Neighbor> newNeighbors, List<Neighbor> replaceableEntry) {
+		replaceableEntry = new ArrayList<Neighbor>(replaceableEntry);
 
-		// INVARIANCE: all neighbor entries from incoming message will be stored
-		// in cache <=> freeSlots + |replacement candidates| > 0
-		assert newNeighbors.size() <= freeSlots() + candidatesForReplacement.size() : "NODE: " + node + " NEW: " + newNeighbors + " FREE: " + freeSlots() + " REPLACE: " + candidatesForReplacement;
+		// INVARIANCE: all neighbor entries from incoming message have always to
+		// be stored in cache. This is possible only iff
+		// freeSlots + |replaceable entries| > 0
+		assert newNeighbors.size() <= freeSlots() + replaceableEntry.size() : " NEW: " + newNeighbors + " FREE: " + freeSlots() + " REPLACE: " + replaceableEntry;
 
 		for (Neighbor newNeighbor : newNeighbors) {
-			// If the are no free cache slots, remove a candidate neighbor
-			// before inserting the new one
+			// If the are no free cache slots, remove a replaceable entry before
+			// inserting the new one
 			if (freeSlots() == 0) {
-				Neighbor cand = candidatesForReplacement.remove(0);
+				Neighbor cand = replaceableEntry.remove(0);
 
-				// INVARIANCE: The replacement candidate has always to be
-				// present in current neighbors (remove returns true if present)
-				assert (this.neighbors.remove(cand)) : node + " " + cand + " not in cache: " + neighbors;
+				// INVARIANCE: The replaceable entry has always to be present in
+				// current neighbors (remove returns true if present)
+				assert (this.neighbors.remove(cand)) : cand + " not in cache: " + neighbors;
 			}
 
 			this.neighbors.add(newNeighbor);
