@@ -2,7 +2,7 @@ package it.unitn.zozin.da.cyclon.task;
 
 import it.unitn.zozin.da.cyclon.NodeActor;
 
-public interface TaskMessage<V, R> {
+public interface MeasureMessage<V, R> {
 
 	public V map(NodeActor n);
 

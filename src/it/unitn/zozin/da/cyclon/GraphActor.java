@@ -1,7 +1,8 @@
 package it.unitn.zozin.da.cyclon;
 
-import it.unitn.zozin.da.cyclon.task.TaskMessage;
-import it.unitn.zozin.da.cyclon.task.TaskMessage.ReportMessage;
+import it.unitn.zozin.da.cyclon.GraphActor.ControlMessage.StatusMessage;
+import it.unitn.zozin.da.cyclon.task.MeasureMessage;
+import it.unitn.zozin.da.cyclon.task.MeasureMessage.ReportMessage;
 import akka.actor.ActorRef;
 import akka.actor.PoisonPill;
 import akka.actor.Props;
@@ -9,29 +10,34 @@ import akka.actor.UntypedActor;
 
 public class GraphActor extends UntypedActor {
 
-	// Cyclon parameter
-	public static final int CACHE_SIZE = 3;
-	public static final int SHUFFLE_LENGTH = 2;
-
 	// Task processing state
 	private int pendingNodes = 0;
 	private ActorRef taskSender;
-	private TaskMessage task;
+	private MeasureMessage task;
 	private Object partial;
 
 	@Override
 	public void onReceive(Object message) throws Exception {
 		if (message instanceof ControlMessage)
 			handleControlMessage((ControlMessage) message);
-		else if (message instanceof TaskMessage)
-			handleTaskMessage((TaskMessage) message);
+		else if (message instanceof StatusMessage)
+			handleStatusMessage((StatusMessage) message);
+		else if (message instanceof MeasureMessage)
+			handleMeasureMessage((MeasureMessage) message);
 		else if (message instanceof ReportMessage)
 			handleReportMessage((ReportMessage) message);
 		else
 			throw new IllegalStateException("Unknown message type " + message.getClass());
 	}
 
+	private void handleStatusMessage(StatusMessage message) {
+		pendingNodes--;
+		if (pendingNodes == 0)
+			taskSender.tell(new StatusMessage(), getSelf());
+	}
+
 	private void handleControlMessage(ControlMessage message) {
+		taskSender = getSender();
 		message.execute(this);
 	}
 
@@ -40,7 +46,7 @@ public class GraphActor extends UntypedActor {
 	 * 
 	 * @param message
 	 */
-	private void handleTaskMessage(TaskMessage message) {
+	private void handleMeasureMessage(MeasureMessage message) {
 		if (pendingNodes > 0)
 			return;
 
@@ -51,10 +57,11 @@ public class GraphActor extends UntypedActor {
 
 		System.out.println("STARTING GRAPH TASK " + message);
 
-		for (ActorRef c : getContext().getChildren()) {
+		for (ActorRef c : getContext().getChildren())
 			pendingNodes++;
+
+		for (ActorRef c : getContext().getChildren())
 			c.tell(message, getSelf());
-		}
 	}
 
 	/**
@@ -74,14 +81,18 @@ public class GraphActor extends UntypedActor {
 
 	interface ControlMessage {
 
-		void execute(GraphActor g);
+		void execute(UntypedActor a);
+
+		class StatusMessage {
+
+		}
 	}
 
 	public static class AddNodeMessage implements ControlMessage {
 
 		@Override
-		public void execute(GraphActor g) {
-			g.getContext().actorOf(Props.create(NodeActor.class, CACHE_SIZE, SHUFFLE_LENGTH));
+		public void execute(UntypedActor a) {
+			((GraphActor) a).getContext().actorOf(Props.create(NodeActor.class));
 		}
 
 	}
@@ -89,8 +100,24 @@ public class GraphActor extends UntypedActor {
 	public static class RemoveNodeMessage implements ControlMessage {
 
 		@Override
-		public void execute(GraphActor g) {
-			g.getContext().children().head().tell(PoisonPill.getInstance(), g.getSelf());
+		public void execute(UntypedActor a) {
+			((GraphActor) a).getContext().children().head().tell(PoisonPill.getInstance(), ((GraphActor) a).getSelf());
+		}
+	}
+
+	public static class StartRoundMessage implements ControlMessage {
+
+		@Override
+		public void execute(UntypedActor a) {
+			if (a instanceof GraphActor) {
+				GraphActor g = (GraphActor) a;
+				for (ActorRef c : g.getContext().getChildren())
+					g.pendingNodes++;
+
+				for (ActorRef c : g.getContext().getChildren())
+					c.tell(this, g.getSelf());
+			} else
+				((NodeActor) a).startProtocolRound();
 		}
 	}
 }

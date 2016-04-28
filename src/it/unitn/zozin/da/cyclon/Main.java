@@ -3,6 +3,7 @@ package it.unitn.zozin.da.cyclon;
 import it.unitn.zozin.da.cyclon.ControlActor.Configuration;
 import akka.actor.ActorRef;
 import akka.actor.ActorSystem;
+import akka.actor.PoisonPill;
 import akka.actor.Props;
 import akka.pattern.PatternsCS;
 
@@ -16,8 +17,8 @@ public class Main {
 		Configuration config = new Configuration();
 
 		PatternsCS.ask(control, config, 10000).thenAccept((report) -> {
-			System.out.println("Report " + report);
-			s.terminate();
+			System.out.println("FINAL REPORT: " + report);
+			s.guardian().tell(PoisonPill.getInstance(), null);
 		});
 	}
 }

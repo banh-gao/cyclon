@@ -1,15 +1,11 @@
 package it.unitn.zozin.da.cyclon;
 
-import it.unitn.zozin.da.cyclon.task.CyclonRoundTask;
-import it.unitn.zozin.da.cyclon.task.MeasuringTask;
-import it.unitn.zozin.da.cyclon.task.MeasuringTask.Result;
-import it.unitn.zozin.da.cyclon.task.TaskMessage.ReportMessage;
+import it.unitn.zozin.da.cyclon.GraphActor.ControlMessage.StatusMessage;
+import it.unitn.zozin.da.cyclon.GraphActor.StartRoundMessage;
 import akka.actor.ActorPath;
 import akka.actor.ActorRef;
 import akka.actor.ActorSelection;
-import akka.actor.PoisonPill;
 import akka.actor.UntypedActor;
-import akka.pattern.PatternsCS;
 
 class ControlActor extends UntypedActor {
 
@@ -19,7 +15,6 @@ class ControlActor extends UntypedActor {
 	private ActorRef sender;
 
 	private int remainingRounds;
-	private Result result;
 
 	@Override
 	public void preStart() throws Exception {
@@ -36,16 +31,14 @@ class ControlActor extends UntypedActor {
 
 	private void runSimulationRound() {
 		if (remainingRounds == 0) {
-			System.out.println("FINISH");
-			getContext().parent().tell(PoisonPill.getInstance(), getSelf());
-			sender.tell(result, getSelf());
+			// TODO: terminate simulation
 			return;
 		}
 		remainingRounds--;
+
 		removeNodes(conf.NODE_REM);
 		addNodes(conf.NODE_ADD);
-		executeCyclonRound();
-		measure();
+		executeProtocolRound();
 	}
 
 	private void addNodes(int nodes) {
@@ -62,19 +55,25 @@ class ControlActor extends UntypedActor {
 			g.tell(new GraphActor.RemoveNodeMessage(), getSelf());
 	}
 
-	private void executeCyclonRound() {
+	private void executeProtocolRound() {
 		ActorSelection g = getContext().actorSelection(GRAPH);
-		PatternsCS.ask(g, new CyclonRoundTask(), 1000).thenRun(this::measure);
+		g.tell(new StartRoundMessage(), getSelf());
 	}
 
 	private void measure() {
+		// TODO
+		if (true) {
+			runSimulationRound();
+			return;
+		}
 		ActorSelection g = getContext().actorSelection(GRAPH);
-		PatternsCS.ask(g, new MeasuringTask(), 1000).thenAccept(this::aggregateMeasures);
+		// PatternsCS.ask(g, new MeasuringTask(),
+		// 1000).thenAccept(this::aggregateMeasures);
 	}
 
 	private void aggregateMeasures(Object msg) {
-		Result res = (Result) ((ReportMessage) msg).value;
-		System.out.println("Aggregating rounds " + res);
+		// Result res = (Result) ((ReportMessage) msg).value;
+		// System.out.println("Aggregating rounds " + res);
 		runSimulationRound();
 	}
 
@@ -84,20 +83,17 @@ class ControlActor extends UntypedActor {
 			conf = (Configuration) message;
 			sender = getSender();
 			startSimulation();
-		} else if (message instanceof ReportMessage) {
-			System.out.println("REPORT FROM " + getSender().path().name() + ": " + ((ReportMessage) message).value);
+		} else if (message instanceof StatusMessage) {
+			measure();
 		}
 	}
 
 	public static class Configuration {
 
 		// Simulation params
-		int NODES = 4;
-		int ROUNDS = 1;
+		int NODES = 10;
+		int ROUNDS = 4;
 		int NODE_ADD = 0;
 		int NODE_REM = 0;
-
-		// Cyclon params
-		int NEIGHBORS = 2;
 	}
 }
