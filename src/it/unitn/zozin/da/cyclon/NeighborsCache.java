@@ -48,32 +48,31 @@ public class NeighborsCache {
 
 		Collections.shuffle(out, rand);
 
-		if (out.size() > 1)
-			out = out.subList(0, Math.min(shuffleLength, out.size()));
-		return out;
+		return out.subList(0, Math.min(shuffleLength, out.size()));
 	}
 
-	public void updateNeighbors(Collection<Neighbor> newNeighbors, List<Neighbor> candidatesForReplacement) {
+	public void updateNeighbors(Collection<Neighbor> newNeighbors, List<Neighbor> candidatesForReplacement, NodeActor node) {
 		candidatesForReplacement = new ArrayList<Neighbor>(candidatesForReplacement);
 
-		System.out.println("NEW: " + newNeighbors.size() + " FREE SLOTS: " + (MAX_SIZE - neighbors.size()) + " REPLACEABLE: " + candidatesForReplacement.size());
-
-		if (MAX_SIZE - neighbors.size() + candidatesForReplacement.size() == 0)
-			throw new IllegalStateException("NEW: " + newNeighbors.size() + " FREE SLOTS: " + (MAX_SIZE - neighbors.size()) + " REPLACEABLE: " + candidatesForReplacement.size());
+		// INVARIANCE: all neighbor entries from incoming message will be stored
+		// in cache <=> freeSlots + |replacement candidates| > 0
+		assert newNeighbors.size() <= freeSlots() + candidatesForReplacement.size() : "NODE: " + node + " NEW: " + newNeighbors + " FREE: " + freeSlots() + " REPLACE: " + candidatesForReplacement;
 
 		for (Neighbor newNeighbor : newNeighbors) {
-			// If the cache is full, remove a candidate neighbor before
-			// inserting the new one
-			if (this.neighbors.size() == MAX_SIZE) {
-				Neighbor last = candidatesForReplacement.remove(0);
-				if (!this.neighbors.remove(last))
-					throw new IllegalStateException(last + " NOT CONTAINED!");
+			// If the are no free cache slots, remove a candidate neighbor
+			// before inserting the new one
+			if (freeSlots() == 0) {
+				Neighbor cand = candidatesForReplacement.remove(0);
+
+				// INVARIANCE: The replacement candidate has always to be
+				// present in current neighbors (remove returns true if present)
+				assert (this.neighbors.remove(cand)) : node + " " + cand + " not in cache: " + neighbors;
 			}
 
 			this.neighbors.add(newNeighbor);
 		}
 
-		assert (newNeighbors.isEmpty());
+		// INVARIANCE: cache size never exceeds maximum size
 		assert (neighbors.size() <= MAX_SIZE);
 	}
 
@@ -82,6 +81,12 @@ public class NeighborsCache {
 		return "NeighborsCache " + neighbors;
 	}
 
+	/**
+	 * Neighbor objects are sorted only by age (Comparable interface) but the
+	 * equals method compares only the address (This class is inconsistent with
+	 * the Comparable interface specification)
+	 *
+	 */
 	public static class Neighbor implements Comparable<Neighbor> {
 
 		Integer age;
@@ -129,7 +134,7 @@ public class NeighborsCache {
 
 	}
 
-	public int size() {
-		return neighbors.size();
+	public int freeSlots() {
+		return MAX_SIZE - neighbors.size();
 	}
 }

@@ -18,16 +18,15 @@ public class NodeActor extends UntypedActor {
 	public static final int CACHE_SIZE = 5;
 	public static final int SHUFFLE_LENGTH = 1;
 
-	public static final int REQUEST_TIMEOUT = 1000;
+	private Neighbor selfAddress;
+	private int round = 0;
 
 	private final NeighborsCache cache;
-	private Neighbor selfAddress;
-
-	private int round = 0;
 	private List<Neighbor> replaceableNodes;
 
 	public NodeActor() {
-		this.cache = new NeighborsCache(CACHE_SIZE);
+		cache = new NeighborsCache(CACHE_SIZE);
+		replaceableNodes = new ArrayList<Neighbor>(SHUFFLE_LENGTH);
 	}
 
 	@Override
@@ -51,29 +50,36 @@ public class NodeActor extends UntypedActor {
 				return;
 
 			// TODO: Implement cyclon join protocol
-			if (cache.size() == CACHE_SIZE)
+			if (cache.freeSlots() == 0)
 				return; // Boot completed: ignore other identities
 
-			this.cache.updateNeighbors(Collections.singletonList(new Neighbor(0, remoteActor)), Collections.emptyList());
+			this.cache.updateNeighbors(Collections.singletonList(new Neighbor(0, remoteActor)), Collections.emptyList(), this);
 
-			if (cache.size() == CACHE_SIZE) {
+			if (cache.freeSlots() == 0) {
 				sendCyclonRequest();
 			}
 		}
 	}
 
+	private void processProtocolMessage(ProtocolMessage message) {
+		CyclonNodeList nodeList = (CyclonNodeList) message;
+		if (nodeList.isRequest)
+			processCyclonRequest(nodeList);
+		else
+			processCyclonAnswer(nodeList);
+	}
+
 	public void startProtocolRound() {
-		if (cache.size() < CACHE_SIZE) {
+		if (cache.freeSlots() == CACHE_SIZE) {
 			performBoot();
 		} else {
-			round++;
 			sendCyclonRequest();
 		}
 	}
 
 	private void performBoot() {
-		getContext().actorSelection("../*").tell(new Identify(null), getSelf());
 		// TODO: implement cyclon join protocol
+		getContext().actorSelection("../*").tell(new Identify(null), getSelf());
 	}
 
 	public void sendCyclonRequest() {
@@ -85,7 +91,8 @@ public class NodeActor extends UntypedActor {
 		List<Neighbor> requestNodes = cache.getRandomNeighbors(SHUFFLE_LENGTH - 1, dest);
 
 		// Nodes that can be replaced when receiving an answer to this request
-		replaceableNodes = new ArrayList<Neighbor>(requestNodes);
+		replaceableNodes.clear();
+		replaceableNodes.addAll(requestNodes);
 		replaceableNodes.add(dest);
 
 		// Add fresh local node address
@@ -93,38 +100,51 @@ public class NodeActor extends UntypedActor {
 
 		dest.address.tell(new CyclonNodeList(requestNodes, true), getSelf());
 
-		// FIXME: end round when on answer timeout
+		// FIXME: end round also on answer timeout
+	}
+
+	private void processCyclonRequest(CyclonNodeList req) {
+		// Remove itself (if present)
+		while (req.nodes.remove(selfAddress));
+
+		// Prepare answer and save received nodes in cache
+		List<Neighbor> ansNodes = cache.getRandomNeighbors(SHUFFLE_LENGTH);
+
+		cache.updateNeighbors(req.nodes, ansNodes, this);
+
+		// Special case in which a request arrives while the local node is
+		// waiting for an answer to its own request. In this case the entries
+		// that can can be replaced when the answer arrives correspond to the
+		// new entries just stored in the cache.
+		replaceableNodes.clear();
+		replaceableNodes.addAll(req.nodes);
+
+		// Send answer
+		getSender().tell(new CyclonNodeList(ansNodes, false), getSelf());
+	}
+
+	private void processCyclonAnswer(CyclonNodeList answer) {
+		// TODO: add invariant to check for previously sent request
+
+		// Remove all entries of itself
+		while (answer.nodes.remove(selfAddress));
+
+		// Save received nodes in cache
+		cache.updateNeighbors(answer.nodes, replaceableNodes, this);
+
+		// Complete node protocol simulation round
+		sendRoundCompletedStatus();
 	}
 
 	private void sendRoundCompletedStatus() {
 		System.out.println(round + " " + getSelf().path().name() + " CACHE: " + cache);
+		round++;
 		getContext().parent().tell(new StatusMessage(), getSelf());
 	}
 
-	private void processProtocolMessage(ProtocolMessage message) {
-		CyclonNodeList nodeList = (CyclonNodeList) message;
-		if (nodeList.isRequest)
-			processCyclonRequest(nodeList);
-		else
-			processCyclonAnswer(nodeList);
-	}
-
-	private void processCyclonRequest(CyclonNodeList message) {
-		while (message.nodes.remove(selfAddress));
-
-		List<Neighbor> nodes = cache.getRandomNeighbors(SHUFFLE_LENGTH);
-
-		cache.updateNeighbors(message.nodes, nodes);
-
-		getSender().tell(new CyclonNodeList(nodes, false), getSelf());
-	}
-
-	private void processCyclonAnswer(CyclonNodeList answer) {
-		while (answer.nodes.remove(selfAddress));
-
-		cache.updateNeighbors(answer.nodes, replaceableNodes);
-
-		sendRoundCompletedStatus();
+	@Override
+	public String toString() {
+		return "NodeActor [selfAddress=" + selfAddress + ", round=" + round + "]";
 	}
 
 	interface ProtocolMessage {

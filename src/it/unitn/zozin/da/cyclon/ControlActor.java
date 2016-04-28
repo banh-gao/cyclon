@@ -46,8 +46,6 @@ class ControlActor extends UntypedActor {
 		ActorSelection g = getContext().actorSelection(GRAPH);
 		for (int i = 0; i < nodes; i++)
 			g.tell(new GraphActor.AddNodeMessage(), getSelf());
-
-		// TODO:init new nodes
 	}
 
 	private void removeNodes(int nodes) {
@@ -93,7 +91,7 @@ class ControlActor extends UntypedActor {
 
 		// Simulation params
 		int NODES = 10;
-		int ROUNDS = 1;
+		int ROUNDS = 2;
 		int NODE_ADD = 0;
 		int NODE_REM = 0;
 	}
