@@ -1,5 +1,6 @@
 package it.unitn.zozin.da.cyclon;
 
+import it.unitn.zozin.da.cyclon.GraphActor.StartMeasureMessage;
 import it.unitn.zozin.da.cyclon.GraphActor.StartRoundMessage;
 import it.unitn.zozin.da.cyclon.Message.StatusMessage;
 import it.unitn.zozin.da.cyclon.Message.TaskMessage;
@@ -53,6 +54,7 @@ public class NodeActor extends UntypedActor {
 
 	static {
 		MATCHER.set(StartRoundMessage.class, PROCESS_TASK);
+		MATCHER.set(StartMeasureMessage.class, PROCESS_TASK);
 		MATCHER.set(ActorIdentity.class, PROCESS_JOIN_ANS);
 		MATCHER.set(CyclonNodeList.class, PROCESS_NODELIST);
 	}
@@ -60,8 +62,9 @@ public class NodeActor extends UntypedActor {
 	private int round = 0;
 	private boolean bootCompleted = false;
 
+	final NeighborsCache cache;
+
 	private Neighbor selfAddress;
-	private final NeighborsCache cache;
 	private List<Neighbor> replaceableEntries;
 
 	public NodeActor() {

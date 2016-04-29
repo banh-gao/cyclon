@@ -1,7 +1,10 @@
 package it.unitn.zozin.da.cyclon;
 
+import it.unitn.zozin.da.cyclon.GraphActor.MeasureMessage.MeasureDataMessage;
+import it.unitn.zozin.da.cyclon.GraphActor.StartMeasureMessage;
 import it.unitn.zozin.da.cyclon.GraphActor.StartRoundMessage;
 import it.unitn.zozin.da.cyclon.Message.StatusMessage;
+import java.util.function.BiConsumer;
 import akka.actor.ActorPath;
 import akka.actor.ActorRef;
 import akka.actor.ActorSelection;
@@ -10,6 +13,31 @@ import akka.actor.UntypedActor;
 class ControlActor extends UntypedActor {
 
 	private static ActorPath GRAPH;
+
+	private static final MessageMatcher<ControlActor> MATCHER = MessageMatcher.getInstance();
+
+	private static final BiConsumer<Configuration, ControlActor> PROCESS_CONF = (Configuration conf, ControlActor c) -> {
+		c.conf = conf;
+		c.sender = c.getSender();
+		c.startSimulation();
+	};
+
+	private static final BiConsumer<StatusMessage, ControlActor> PROCESS_ROUND_END = (StatusMessage status, ControlActor c) -> {
+		c.executeMeasure();
+	};
+
+	private static final BiConsumer<MeasureDataMessage, ControlActor> PROCESS_MEASURE_DATA = (MeasureDataMessage data, ControlActor c) -> {
+		// TODO: aggregate per round
+		System.out.println(data.degreeDistr);
+		// Start next round
+		// c.runSimulationRound();
+	};
+
+	static {
+		MATCHER.set(Configuration.class, PROCESS_CONF);
+		MATCHER.set(StatusMessage.class, PROCESS_ROUND_END);
+		MATCHER.set(MeasureDataMessage.class, PROCESS_MEASURE_DATA);
+	}
 
 	private Configuration conf;
 	private ActorRef sender;
@@ -22,23 +50,27 @@ class ControlActor extends UntypedActor {
 		GRAPH = userRoot.child("graph");
 	}
 
+	@Override
+	public void onReceive(Object message) throws Exception {
+		MATCHER.process(message, this);
+	}
+
 	private void startSimulation() {
 		addNodes(conf.NODES);
 		remainingRounds = conf.ROUNDS;
-
 		runSimulationRound();
 	}
 
 	private void runSimulationRound() {
 		if (remainingRounds == 0) {
 			sender.tell(new StatusMessage(), getSelf());
-			// TODO: terminate simulation
 			return;
 		}
 		remainingRounds--;
 
 		removeNodes(conf.NODE_REM);
 		addNodes(conf.NODE_ADD);
+
 		executeProtocolRound();
 	}
 
@@ -59,26 +91,19 @@ class ControlActor extends UntypedActor {
 		g.tell(new StartRoundMessage(), getSelf());
 	}
 
+	private void executeMeasure() {
+		ActorSelection g = getContext().actorSelection(GRAPH);
+		g.tell(new StartMeasureMessage(), getSelf());
+	}
+
 	private void measure() {
 		// TODO
-		if (true) {
-			runSimulationRound();
-			return;
-		}
+
 		// ActorSelection g = getContext().actorSelection(GRAPH);
 		// PatternsCS.ask(g, new MeasuringTask(),
 		// 1000).thenAccept(this::aggregateMeasures);
-	}
 
-	@Override
-	public void onReceive(Object message) throws Exception {
-		if (message instanceof Configuration) {
-			conf = (Configuration) message;
-			sender = getSender();
-			startSimulation();
-		} else if (message instanceof StatusMessage) {
-			measure();
-		}
+		runSimulationRound();
 	}
 
 	public static class Configuration {
@@ -89,4 +114,5 @@ class ControlActor extends UntypedActor {
 		int NODE_ADD = 0;
 		int NODE_REM = 0;
 	}
+
 }

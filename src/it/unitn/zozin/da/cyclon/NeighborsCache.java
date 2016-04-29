@@ -138,4 +138,8 @@ public class NeighborsCache {
 	public int freeSlots() {
 		return MAX_SIZE - neighbors.size();
 	}
+
+	public int size() {
+		return neighbors.size();
+	}
 }
