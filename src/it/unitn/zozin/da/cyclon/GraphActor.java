@@ -1,13 +1,35 @@
 package it.unitn.zozin.da.cyclon;
 
-import it.unitn.zozin.da.cyclon.Message.ControlMessage;
 import it.unitn.zozin.da.cyclon.Message.StatusMessage;
+import it.unitn.zozin.da.cyclon.Message.TaskMessage;
+import java.util.function.BiConsumer;
 import akka.actor.ActorRef;
 import akka.actor.PoisonPill;
 import akka.actor.Props;
 import akka.actor.UntypedActor;
+import akka.dispatch.ControlMessage;
 
 public class GraphActor extends UntypedActor {
+
+	private static final MessageMatcher<GraphActor> MATCHER = MessageMatcher.getInstance();
+
+	private static final BiConsumer<ControlMessage, GraphActor> PROCESS_TASK = (ControlMessage message, GraphActor g) -> {
+		if (message instanceof TaskMessage) {
+			g.taskSender = g.getSender();
+			((TaskMessage) message).execute(g);
+		} else {
+			g.pendingNodes--;
+			if (g.pendingNodes == 0)
+				g.taskSender.tell(new StatusMessage(), g.getSelf());
+		}
+	};
+
+	static {
+		MATCHER.set(StartRoundMessage.class, PROCESS_TASK);
+		MATCHER.set(AddNodeMessage.class, PROCESS_TASK);
+		MATCHER.set(RemoveNodeMessage.class, PROCESS_TASK);
+		MATCHER.set(StatusMessage.class, PROCESS_TASK);
+	}
 
 	// Task processing state
 	private int pendingNodes = 0;
@@ -15,26 +37,10 @@ public class GraphActor extends UntypedActor {
 
 	@Override
 	public void onReceive(Object message) throws Exception {
-		if (message instanceof ControlMessage)
-			handleControlMessage((ControlMessage) message);
-		else if (message instanceof StatusMessage)
-			handleStatusMessage((StatusMessage) message);
-		else
-			throw new IllegalStateException("Unknown message type " + message.getClass());
+		MATCHER.process(message, this);
 	}
 
-	private void handleStatusMessage(StatusMessage message) {
-		pendingNodes--;
-		if (pendingNodes == 0)
-			taskSender.tell(new StatusMessage(), getSelf());
-	}
-
-	private void handleControlMessage(ControlMessage message) {
-		taskSender = getSender();
-		message.execute(this);
-	}
-
-	public static class AddNodeMessage extends ControlMessage {
+	public static class AddNodeMessage implements TaskMessage {
 
 		@Override
 		public void execute(UntypedActor a) {
@@ -42,7 +48,7 @@ public class GraphActor extends UntypedActor {
 		}
 	}
 
-	public static class RemoveNodeMessage extends ControlMessage {
+	public static class RemoveNodeMessage implements TaskMessage {
 
 		@Override
 		public void execute(UntypedActor a) {
@@ -50,7 +56,7 @@ public class GraphActor extends UntypedActor {
 		}
 	}
 
-	public static class StartRoundMessage extends ControlMessage {
+	public static class StartRoundMessage implements TaskMessage {
 
 		@Override
 		public void execute(UntypedActor a) {

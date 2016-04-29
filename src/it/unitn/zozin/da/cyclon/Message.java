@@ -1,19 +1,20 @@
 package it.unitn.zozin.da.cyclon;
 
 import akka.actor.UntypedActor;
+import akka.dispatch.ControlMessage;
 
-public abstract class Message {
+public interface Message {
 
-	public static abstract class ControlMessage implements akka.dispatch.ControlMessage {
+	public interface TaskMessage extends ControlMessage {
 
-		abstract void execute(UntypedActor a);
+		void execute(UntypedActor a);
 	}
 
-	public static class StatusMessage implements akka.dispatch.ControlMessage {
+	public class StatusMessage implements ControlMessage {
 
 	}
 
-	public static abstract class DataMessage extends Message {
+	public interface DataMessage {
 
 	}
 }

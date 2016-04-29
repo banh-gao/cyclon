@@ -1,17 +1,15 @@
 package it.unitn.zozin.da.cyclon;
 
-import it.unitn.zozin.da.cyclon.Message.ControlMessage;
-import it.unitn.zozin.da.cyclon.Message.DataMessage;
+import it.unitn.zozin.da.cyclon.GraphActor.StartRoundMessage;
 import it.unitn.zozin.da.cyclon.Message.StatusMessage;
+import it.unitn.zozin.da.cyclon.Message.TaskMessage;
 import it.unitn.zozin.da.cyclon.NeighborsCache.Neighbor;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
-import scala.concurrent.duration.Duration;
+import java.util.function.BiConsumer;
 import akka.actor.ActorIdentity;
 import akka.actor.ActorRef;
-import akka.actor.Cancellable;
 import akka.actor.Identify;
 import akka.actor.UntypedActor;
 
@@ -20,12 +18,48 @@ public class NodeActor extends UntypedActor {
 	public static final int CACHE_SIZE = 5;
 	public static final int SHUFFLE_LENGTH = 1;
 
+	private static final MessageMatcher<NodeActor> MATCHER = MessageMatcher.getInstance();
+
+	private static final BiConsumer<TaskMessage, NodeActor> PROCESS_TASK = (TaskMessage message, NodeActor n) -> {
+		message.execute(n);
+	};
+
+	// TODO: Implement cyclon join protocol
+	private static final BiConsumer<ActorIdentity, NodeActor> PROCESS_BOOT_ANS = (ActorIdentity id, NodeActor n) -> {
+		ActorRef remoteActor = id.getRef();
+
+		// Ignore self identity
+		if (remoteActor.equals(n.getSelf()))
+			return;
+
+		if (n.cache.freeSlots() == 0)
+			return; // Boot completed: ignore other identities
+
+		n.cache.updateNeighbors(Collections.singletonList(new Neighbor(0, remoteActor)), Collections.emptyList());
+
+		if (n.cache.freeSlots() == 0) {
+			n.sendCyclonRequest();
+		}
+	};
+
+	private static final BiConsumer<CyclonNodeList, NodeActor> PROCESS_NODELIST = (CyclonNodeList nodeList, NodeActor n) -> {
+		if (nodeList.isRequest)
+			n.processCyclonRequest(nodeList);
+		else
+			n.processCyclonAnswer(nodeList);
+	};
+
+	static {
+		MATCHER.set(StartRoundMessage.class, PROCESS_TASK);
+		MATCHER.set(ActorIdentity.class, PROCESS_BOOT_ANS);
+		MATCHER.set(CyclonNodeList.class, PROCESS_NODELIST);
+	}
+
 	private Neighbor selfAddress;
 	private int round = 0;
 
 	private final NeighborsCache cache;
 	private List<Neighbor> replaceableEntries;
-	private Cancellable timeout;
 
 	public NodeActor() {
 		cache = new NeighborsCache(CACHE_SIZE);
@@ -39,35 +73,7 @@ public class NodeActor extends UntypedActor {
 
 	@Override
 	public void onReceive(Object message) throws Exception {
-		if (message instanceof ControlMessage)
-			((ControlMessage) message).execute(this);
-		else if (message instanceof ProtocolMessage)
-			processProtocolMessage((ProtocolMessage) message);
-		else if (message instanceof ActorIdentity) {
-			ActorRef remoteActor = ((ActorIdentity) message).getRef();
-
-			// Ignore self identity
-			if (remoteActor.equals(getSelf()))
-				return;
-
-			// TODO: Implement cyclon join protocol
-			if (cache.freeSlots() == 0)
-				return; // Boot completed: ignore other identities
-
-			cache.updateNeighbors(Collections.singletonList(new Neighbor(0, remoteActor)), Collections.emptyList());
-
-			if (cache.freeSlots() == 0) {
-				sendCyclonRequest();
-			}
-		}
-	}
-
-	private void processProtocolMessage(ProtocolMessage message) {
-		CyclonNodeList nodeList = (CyclonNodeList) message;
-		if (nodeList.isRequest)
-			processCyclonRequest(nodeList);
-		else
-			processCyclonAnswer(nodeList);
+		MATCHER.process(message, this);
 	}
 
 	public void startProtocolRound() {
@@ -105,13 +111,6 @@ public class NodeActor extends UntypedActor {
 		System.out.println(round + " REQ SENT!");
 
 		// TODO: end round also on answer timeout
-		timeout = getContext().system().scheduler().scheduleOnce(Duration.create(1000, TimeUnit.SECONDS), new Runnable() {
-
-			@Override
-			public void run() {
-				System.out.println("TIMEOUT!");
-			}
-		}, getContext().system().dispatcher());
 	}
 
 	private void processCyclonRequest(CyclonNodeList req) {
@@ -135,7 +134,6 @@ public class NodeActor extends UntypedActor {
 	}
 
 	private void processCyclonAnswer(CyclonNodeList answer) {
-		timeout.cancel();
 		// Remove itself (if present)
 		answer.nodes.remove(selfAddress);
 
@@ -152,11 +150,7 @@ public class NodeActor extends UntypedActor {
 		getContext().parent().tell(new StatusMessage(), getSelf());
 	}
 
-	static abstract class ProtocolMessage extends DataMessage {
-
-	}
-
-	public static class CyclonNodeList extends ProtocolMessage {
+	public static class CyclonNodeList {
 
 		final boolean isRequest;
 		final List<Neighbor> nodes;
@@ -167,7 +161,7 @@ public class NodeActor extends UntypedActor {
 		}
 	}
 
-	public static class CyclonJoin extends ProtocolMessage {
+	public static class CyclonJoin {
 
 	}
 }
