@@ -3,8 +3,10 @@ package it.unitn.zozin.da.cyclon;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
+import java.util.Set;
 import akka.actor.ActorRef;
 
 public class NeighborsCache {
@@ -51,8 +53,8 @@ public class NeighborsCache {
 		return out.subList(0, Math.min(shuffleLength, out.size()));
 	}
 
-	public void updateNeighbors(Collection<Neighbor> newNeighbors, List<Neighbor> replaceableEntry) {
-		replaceableEntry = new ArrayList<Neighbor>(replaceableEntry);
+	public void updateNeighbors(Collection<Neighbor> newNeighbors, Set<Neighbor> replaceableEntry) {
+		Iterator<Neighbor> replaceableEntryIter = replaceableEntry.iterator();
 
 		// INVARIANCE: all neighbor entries from incoming message have always to
 		// be stored in cache. This is possible only iff
@@ -63,7 +65,7 @@ public class NeighborsCache {
 			// If the are no free cache slots, remove a replaceable entry before
 			// inserting the new one
 			if (freeSlots() == 0) {
-				Neighbor cand = replaceableEntry.remove(0);
+				Neighbor cand = replaceableEntryIter.next();
 
 				// INVARIANCE: The replaceable entry has always to be present in
 				// current neighbors (remove returns true if present)
@@ -141,5 +143,9 @@ public class NeighborsCache {
 
 	public int size() {
 		return neighbors.size();
+	}
+
+	public List<Neighbor> getNeighbors() {
+		return Collections.unmodifiableList(neighbors);
 	}
 }

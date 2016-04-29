@@ -1,6 +1,6 @@
 package it.unitn.zozin.da.cyclon;
 
-import it.unitn.zozin.da.cyclon.GraphActor.MeasureMessage.MeasureDataMessage;
+import it.unitn.zozin.da.cyclon.GraphActor.MeasureMessage.SimulationDataMessage;
 import it.unitn.zozin.da.cyclon.GraphActor.StartMeasureMessage;
 import it.unitn.zozin.da.cyclon.GraphActor.StartRoundMessage;
 import it.unitn.zozin.da.cyclon.Message.StatusMessage;
@@ -23,20 +23,21 @@ class ControlActor extends UntypedActor {
 	};
 
 	private static final BiConsumer<StatusMessage, ControlActor> PROCESS_ROUND_END = (StatusMessage status, ControlActor c) -> {
-		c.executeMeasure();
+		c.runSimulationRound();
+
 	};
 
-	private static final BiConsumer<MeasureDataMessage, ControlActor> PROCESS_MEASURE_DATA = (MeasureDataMessage data, ControlActor c) -> {
+	private static final BiConsumer<SimulationDataMessage, ControlActor> PROCESS_MEASURE_DATA = (SimulationDataMessage data, ControlActor c) -> {
 		// TODO: aggregate per round
-		System.out.println(data.degreeDistr);
+		c.sender.tell(data, c.getSelf());
 		// Start next round
-		c.runSimulationRound();
+
 	};
 
 	static {
 		MATCHER.set(Configuration.class, PROCESS_CONF);
 		MATCHER.set(StatusMessage.class, PROCESS_ROUND_END);
-		MATCHER.set(MeasureDataMessage.class, PROCESS_MEASURE_DATA);
+		MATCHER.set(SimulationDataMessage.class, PROCESS_MEASURE_DATA);
 	}
 
 	private Configuration conf;
@@ -63,7 +64,7 @@ class ControlActor extends UntypedActor {
 
 	private void runSimulationRound() {
 		if (remainingRounds == 0) {
-			sender.tell(new StatusMessage(), getSelf());
+			executeMeasure();
 			return;
 		}
 		remainingRounds--;
@@ -77,7 +78,7 @@ class ControlActor extends UntypedActor {
 	private void addNodes(int nodes) {
 		ActorSelection g = getContext().actorSelection(GRAPH);
 		for (int i = 0; i < nodes; i++)
-			g.tell(new GraphActor.AddNodeMessage(), getSelf());
+			g.tell(new GraphActor.AddNodeMessage(conf.CYCLON_CACHE_SIZE, conf.CYCLON_SHUFFLE_LENGTH), getSelf());
 	}
 
 	private void removeNodes(int nodes) {
@@ -96,13 +97,15 @@ class ControlActor extends UntypedActor {
 		g.tell(new StartMeasureMessage(), getSelf());
 	}
 
+	// Simulation params
 	public static class Configuration {
 
-		// Simulation params
-		int NODES = 10;
-		int ROUNDS = 5;
-		int NODE_ADD = 0;
-		int NODE_REM = 0;
+		int NODES;
+		int ROUNDS;
+		int NODE_ADD;
+		int NODE_REM;
+		int CYCLON_CACHE_SIZE;
+		int CYCLON_SHUFFLE_LENGTH;
 	}
 
 }

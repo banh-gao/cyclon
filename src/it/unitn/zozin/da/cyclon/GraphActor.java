@@ -1,11 +1,14 @@
 package it.unitn.zozin.da.cyclon;
 
 import it.unitn.zozin.da.cyclon.GraphActor.MeasureMessage.MeasureDataMessage;
+import it.unitn.zozin.da.cyclon.GraphActor.MeasureMessage.SimulationDataMessage;
 import it.unitn.zozin.da.cyclon.Message.StatusMessage;
 import it.unitn.zozin.da.cyclon.Message.TaskMessage;
+import it.unitn.zozin.da.cyclon.NeighborsCache.Neighbor;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.TreeMap;
 import java.util.function.BiConsumer;
 import akka.actor.ActorRef;
 import akka.actor.PoisonPill;
@@ -28,12 +31,31 @@ public class GraphActor extends UntypedActor {
 	};
 
 	private static final BiConsumer<MeasureDataMessage, GraphActor> PROCESS_NODE_MEASURE = (MeasureDataMessage measure, GraphActor g) -> {
-		g.aggregateNodesMeasure(measure);
+		g.aggregatedMeasure.aggregate(measure);
 		g.pendingNodes--;
 		if (g.pendingNodes == 0) {
-			g.taskSender.tell(g.aggregatedMeasure, g.getSelf());
+
+			// Calculate in-degree distribution
+			int unreachedNodes = g.aggregatedMeasure.totalNodes;
+			Map<Integer, Integer> inDegreeDist = new TreeMap<Integer, Integer>();
+			for (int inDegree : g.aggregatedMeasure.inDegree.values()) {
+				int v = inDegreeDist.getOrDefault(inDegree, 0);
+				inDegreeDist.put(inDegree, v + 1);
+				unreachedNodes--;
+			}
+
+			inDegreeDist.put(0, unreachedNodes);
+
+			System.out.println(inDegreeDist);
+
+			g.taskSender.tell(new SimulationDataMessage(g.aggregatedMeasure.totalNodes, inDegreeDist), g.getSelf());
 		}
 	};
+
+	private static Map<Integer, Integer> calcInDegreeDistr(MeasureDataMessage aggregatedMeasure2) {
+		// TODO Auto-generated method stub
+		return null;
+	}
 
 	static {
 		MATCHER.set(StartRoundMessage.class, PROCESS_CONTROL_TASK);
@@ -56,16 +78,20 @@ public class GraphActor extends UntypedActor {
 		MATCHER.process(message, this);
 	}
 
-	private void aggregateNodesMeasure(MeasureDataMessage measure) {
-		// TODO Aggregate measure from a node with other nodes
-		aggregatedMeasure.aggregate(measure);
-	}
-
 	public static class AddNodeMessage implements TaskMessage {
+
+		private final int cacheSize;
+		private final int shuffleLength;
+
+		public AddNodeMessage(int cacheSize, int shuffleLength) {
+			this.cacheSize = cacheSize;
+			this.shuffleLength = shuffleLength;
+		}
 
 		@Override
 		public void execute(UntypedActor a) {
-			((GraphActor) a).getContext().actorOf(Props.create(NodeActor.class));
+			GraphActor g = (GraphActor) a;
+			g.getContext().actorOf(Props.create(NodeActor.class, cacheSize, shuffleLength));
 		}
 	}
 
@@ -109,7 +135,12 @@ public class GraphActor extends UntypedActor {
 
 		private MeasureDataMessage measureNode(NodeActor n) {
 			MeasureDataMessage m = new MeasureDataMessage();
-			m.incrementDegree(n.cache.size());
+
+			m.incrementNodeCounter();
+
+			for (Neighbor neighbor : n.cache.getNeighbors())
+				m.incrementInDegree(neighbor.address);
+
 			return m;
 		}
 	}
@@ -118,19 +149,43 @@ public class GraphActor extends UntypedActor {
 
 		public static class MeasureDataMessage {
 
-			final Map<Integer, Integer> degreeDistr = new HashMap<Integer, Integer>();
+			final Map<ActorRef, Integer> inDegree = new HashMap<ActorRef, Integer>();
 
-			public void incrementDegree(int degree) {
-				int nodesNum = degreeDistr.getOrDefault(degreeDistr, 0);
-				degreeDistr.put(degree, nodesNum + 1);
+			int totalNodes = 0;
+
+			public void incrementNodeCounter() {
+				totalNodes++;
+			}
+
+			public void incrementInDegree(ActorRef node) {
+				int v = inDegree.getOrDefault(node, 0);
+				inDegree.put(node, v + 1);
 			}
 
 			public void aggregate(MeasureDataMessage msg) {
-				for (Entry<Integer, Integer> e : msg.degreeDistr.entrySet()) {
-					int nodesNum = degreeDistr.getOrDefault(e.getKey(), 0);
-					degreeDistr.put(e.getKey(), nodesNum + e.getValue());
+				totalNodes += msg.totalNodes;
+				for (Entry<ActorRef, Integer> e : msg.inDegree.entrySet()) {
+					int v = inDegree.getOrDefault(e.getKey(), 0);
+					inDegree.put(e.getKey(), v + e.getValue());
 				}
 			}
+		}
+
+		public static class SimulationDataMessage {
+
+			private final Map<Integer, Integer> degreeDistr;
+			private final int totalNodes;
+
+			public SimulationDataMessage(int totalNodes, Map<Integer, Integer> degreeDistr) {
+				this.totalNodes = totalNodes;
+				this.degreeDistr = degreeDistr;
+			}
+
+			@Override
+			public String toString() {
+				return "SimulationDataMessage [degreeDistr=" + degreeDistr + ", totalNodes=" + totalNodes + "]";
+			}
+
 		}
 	}
 }

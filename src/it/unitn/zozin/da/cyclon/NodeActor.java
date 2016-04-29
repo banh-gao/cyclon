@@ -5,9 +5,10 @@ import it.unitn.zozin.da.cyclon.GraphActor.StartRoundMessage;
 import it.unitn.zozin.da.cyclon.Message.StatusMessage;
 import it.unitn.zozin.da.cyclon.Message.TaskMessage;
 import it.unitn.zozin.da.cyclon.NeighborsCache.Neighbor;
-import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.function.BiConsumer;
 import akka.actor.ActorIdentity;
 import akka.actor.ActorRef;
@@ -15,9 +16,6 @@ import akka.actor.Identify;
 import akka.actor.UntypedActor;
 
 public class NodeActor extends UntypedActor {
-
-	public static final int CACHE_SIZE = 8;
-	public static final int SHUFFLE_LENGTH = 1;
 
 	private static final MessageMatcher<NodeActor> MATCHER = MessageMatcher.getInstance();
 
@@ -38,7 +36,7 @@ public class NodeActor extends UntypedActor {
 			return; // Boot completed: ignore other identities
 
 		if (n.cache.size() == 0) {
-			n.cache.updateNeighbors(Collections.singletonList(new Neighbor(0, remoteActor)), Collections.emptyList());
+			n.cache.updateNeighbors(Collections.singletonList(new Neighbor(0, remoteActor)), Collections.emptySet());
 		}
 
 		n.bootCompleted = true;
@@ -59,17 +57,20 @@ public class NodeActor extends UntypedActor {
 		MATCHER.set(CyclonNodeList.class, PROCESS_NODELIST);
 	}
 
+	private final int shuffleLength;
+
 	private int round = 0;
 	private boolean bootCompleted = false;
 
 	final NeighborsCache cache;
 
 	private Neighbor selfAddress;
-	private List<Neighbor> replaceableEntries;
+	private Set<Neighbor> replaceableEntries;
 
-	public NodeActor() {
-		cache = new NeighborsCache(CACHE_SIZE);
-		replaceableEntries = new ArrayList<Neighbor>(SHUFFLE_LENGTH);
+	public NodeActor(int cacheSize, int shuffleLength) {
+		cache = new NeighborsCache(cacheSize);
+		this.shuffleLength = shuffleLength;
+		replaceableEntries = new HashSet<Neighbor>(shuffleLength);
 	}
 
 	@Override
@@ -83,7 +84,7 @@ public class NodeActor extends UntypedActor {
 	}
 
 	public void startProtocolRound() {
-		if (cache.freeSlots() == CACHE_SIZE) {
+		if (cache.size() == 0) {
 			performBoot();
 		} else {
 			sendCyclonRequest();
@@ -101,7 +102,7 @@ public class NodeActor extends UntypedActor {
 		Neighbor dest = cache.getOldestNeighbor();
 
 		// Get random neighbors (excluding destination neighbor)
-		List<Neighbor> requestNodes = cache.getRandomNeighbors(SHUFFLE_LENGTH - 1, dest);
+		List<Neighbor> requestNodes = cache.getRandomNeighbors(shuffleLength - 1, dest);
 
 		// Cache entries that can be replaced when the answer to this request is
 		// received
@@ -122,15 +123,15 @@ public class NodeActor extends UntypedActor {
 		req.nodes.remove(selfAddress);
 
 		// Prepare answer and save received nodes in cache
-		List<Neighbor> ansNodes = cache.getRandomNeighbors(SHUFFLE_LENGTH);
+		List<Neighbor> ansNodes = cache.getRandomNeighbors(shuffleLength);
 
-		cache.updateNeighbors(req.nodes, ansNodes);
+		cache.updateNeighbors(req.nodes, new HashSet<NeighborsCache.Neighbor>(ansNodes));
 
 		// Handle special case in which a request arrives while the local node
 		// is waiting for an answer to its own request. In this case the entries
 		// that can can be replaced when the answer arrives correspond to the
 		// new entries just stored in the cache with this request.
-		replaceableEntries.clear();
+		replaceableEntries.removeAll(ansNodes);
 		replaceableEntries.addAll(req.nodes);
 
 		// Send answer
