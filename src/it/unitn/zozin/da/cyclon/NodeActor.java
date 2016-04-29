@@ -25,19 +25,21 @@ public class NodeActor extends UntypedActor {
 	};
 
 	// TODO: Implement cyclon join protocol
-	private static final BiConsumer<ActorIdentity, NodeActor> PROCESS_BOOT_ANS = (ActorIdentity id, NodeActor n) -> {
+	private static final BiConsumer<ActorIdentity, NodeActor> PROCESS_JOIN_ANS = (ActorIdentity id, NodeActor n) -> {
 		ActorRef remoteActor = id.getRef();
 
 		// Ignore self identity
 		if (remoteActor.equals(n.getSelf()))
 			return;
 
-		if (n.cache.freeSlots() == 0)
+		if (n.bootCompleted)
 			return; // Boot completed: ignore other identities
 
-		n.cache.updateNeighbors(Collections.singletonList(new Neighbor(0, remoteActor)), Collections.emptyList());
+		if (n.cache.freeSlots() > 0)
+			n.cache.updateNeighbors(Collections.singletonList(new Neighbor(0, remoteActor)), Collections.emptyList());
 
 		if (n.cache.freeSlots() == 0) {
+			n.bootCompleted = true;
 			n.sendCyclonRequest();
 		}
 	};
@@ -51,13 +53,14 @@ public class NodeActor extends UntypedActor {
 
 	static {
 		MATCHER.set(StartRoundMessage.class, PROCESS_TASK);
-		MATCHER.set(ActorIdentity.class, PROCESS_BOOT_ANS);
+		MATCHER.set(ActorIdentity.class, PROCESS_JOIN_ANS);
 		MATCHER.set(CyclonNodeList.class, PROCESS_NODELIST);
 	}
 
-	private Neighbor selfAddress;
 	private int round = 0;
+	private boolean bootCompleted = false;
 
+	private Neighbor selfAddress;
 	private final NeighborsCache cache;
 	private List<Neighbor> replaceableEntries;
 
@@ -107,8 +110,6 @@ public class NodeActor extends UntypedActor {
 		requestNodes.add(selfAddress);
 
 		dest.address.tell(new CyclonNodeList(requestNodes, true), getSelf());
-
-		System.out.println(round + " REQ SENT!");
 
 		// TODO: end round also on answer timeout
 	}
