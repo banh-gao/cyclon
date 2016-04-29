@@ -30,7 +30,7 @@ class ControlActor extends UntypedActor {
 		// TODO: aggregate per round
 		System.out.println(data.degreeDistr);
 		// Start next round
-		// c.runSimulationRound();
+		c.runSimulationRound();
 	};
 
 	static {
@@ -96,21 +96,11 @@ class ControlActor extends UntypedActor {
 		g.tell(new StartMeasureMessage(), getSelf());
 	}
 
-	private void measure() {
-		// TODO
-
-		// ActorSelection g = getContext().actorSelection(GRAPH);
-		// PatternsCS.ask(g, new MeasuringTask(),
-		// 1000).thenAccept(this::aggregateMeasures);
-
-		runSimulationRound();
-	}
-
 	public static class Configuration {
 
 		// Simulation params
 		int NODES = 10;
-		int ROUNDS = 2;
+		int ROUNDS = 5;
 		int NODE_ADD = 0;
 		int NODE_REM = 0;
 	}

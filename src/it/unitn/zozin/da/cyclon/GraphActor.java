@@ -49,7 +49,7 @@ public class GraphActor extends UntypedActor {
 	private int pendingNodes = 0;
 	private ActorRef taskSender;
 
-	private MeasureDataMessage aggregatedMeasure = new MeasureDataMessage();
+	private MeasureDataMessage aggregatedMeasure;
 
 	@Override
 	public void onReceive(Object message) throws Exception {
@@ -98,6 +98,7 @@ public class GraphActor extends UntypedActor {
 		public void execute(UntypedActor a) {
 			if (a instanceof GraphActor) {
 				GraphActor g = (GraphActor) a;
+				g.aggregatedMeasure = new MeasureDataMessage();
 				for (ActorRef c : g.getContext().getChildren()) {
 					g.pendingNodes++;
 					c.tell(this, g.getSelf());

@@ -16,7 +16,7 @@ import akka.actor.UntypedActor;
 
 public class NodeActor extends UntypedActor {
 
-	public static final int CACHE_SIZE = 5;
+	public static final int CACHE_SIZE = 8;
 	public static final int SHUFFLE_LENGTH = 1;
 
 	private static final MessageMatcher<NodeActor> MATCHER = MessageMatcher.getInstance();
@@ -25,7 +25,8 @@ public class NodeActor extends UntypedActor {
 		message.execute(n);
 	};
 
-	// TODO: Implement cyclon join protocol
+	// TODO: Implement cyclon join protocol (Here boot is completed when we have
+	// a link with one neighbor)
 	private static final BiConsumer<ActorIdentity, NodeActor> PROCESS_JOIN_ANS = (ActorIdentity id, NodeActor n) -> {
 		ActorRef remoteActor = id.getRef();
 
@@ -36,13 +37,12 @@ public class NodeActor extends UntypedActor {
 		if (n.bootCompleted)
 			return; // Boot completed: ignore other identities
 
-		if (n.cache.freeSlots() > 0)
+		if (n.cache.size() == 0) {
 			n.cache.updateNeighbors(Collections.singletonList(new Neighbor(0, remoteActor)), Collections.emptyList());
-
-		if (n.cache.freeSlots() == 0) {
-			n.bootCompleted = true;
-			n.sendCyclonRequest();
 		}
+
+		n.bootCompleted = true;
+		n.sendCyclonRequest();
 	};
 
 	private static final BiConsumer<CyclonNodeList, NodeActor> PROCESS_NODELIST = (CyclonNodeList nodeList, NodeActor n) -> {
