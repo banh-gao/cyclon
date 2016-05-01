@@ -46,8 +46,6 @@ public class GraphActor extends UntypedActor {
 
 			inDegreeDist.put(0, unreachedNodes);
 
-			System.out.println(inDegreeDist);
-
 			g.taskSender.tell(new SimulationDataMessage(g.aggregatedMeasure.totalNodes, inDegreeDist), g.getSelf());
 		}
 	};

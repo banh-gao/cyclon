@@ -1,6 +1,7 @@
 package it.unitn.zozin.da.cyclon;
 
 import it.unitn.zozin.da.cyclon.ControlActor.Configuration;
+import it.unitn.zozin.da.cyclon.ControlActor.Configuration.Topology;
 import akka.actor.ActorRef;
 import akka.actor.ActorSystem;
 import akka.actor.PoisonPill;
@@ -15,14 +16,15 @@ public class Main {
 		ActorRef control = s.actorOf(Props.create(ControlActor.class), "control");
 
 		Configuration config = new Configuration();
-		config.NODES = 100;
-		config.ROUNDS = 2;
+		config.BOOT_TOPOLOGY = Topology.CHAIN;
+		config.NODES = 1000;
+		config.ROUNDS = 1000;
 		config.NODE_ADD = 0;
 		config.NODE_REM = 0;
 		config.CYCLON_CACHE_SIZE = 20;
-		config.CYCLON_SHUFFLE_LENGTH = 8;
+		config.CYCLON_SHUFFLE_LENGTH = 15;
 
-		PatternsCS.ask(control, config, 10000).thenAccept((report) -> {
+		PatternsCS.ask(control, config, 1000000).thenAccept((report) -> {
 			System.out.println("FINAL REPORT: " + report);
 			s.guardian().tell(PoisonPill.getInstance(), null);
 		});
