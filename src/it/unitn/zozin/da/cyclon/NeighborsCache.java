@@ -53,26 +53,29 @@ public class NeighborsCache {
 		return out.subList(0, Math.min(shuffleLength, out.size()));
 	}
 
-	public void updateNeighbors(Collection<Neighbor> newNeighbors, Set<Neighbor> replaceableEntry) {
-		Iterator<Neighbor> replaceableEntryIter = replaceableEntry.iterator();
-
+	public void updateNeighbors(Collection<Neighbor> newEntries, Set<Integer> replaceableEntries) {
 		// INVARIANCE: all neighbor entries from incoming message have always to
 		// be stored in cache. This is possible only iff
 		// freeSlots + |replaceable entries| > 0
-		assert newNeighbors.size() <= freeSlots() + replaceableEntry.size() : " NEW: " + newNeighbors + " FREE: " + freeSlots() + " REPLACE: " + replaceableEntry;
+		assert newEntries.size() <= freeSlots() + replaceableEntries.size() : " NEW: " + newEntries.size() + " FREE: " + freeSlots() + " REPLACE: " + replaceableEntries.size();
 
-		for (Neighbor newNeighbor : newNeighbors) {
+		Iterator<Integer> replaceableEntriesIter = replaceableEntries.iterator();
+		for (Neighbor newNeighbor : newEntries) {
 			// If the are no free cache slots, remove a replaceable entry before
 			// inserting the new one
+
+			int entryIndex = (neighbors.size() == 0) ? 0 : neighbors.size() - 1;
+
 			if (freeSlots() == 0) {
-				Neighbor cand = replaceableEntryIter.next();
+				entryIndex = replaceableEntriesIter.next();
 
 				// INVARIANCE: The replaceable entry has always to be present in
 				// current neighbors (remove returns true if present)
-				assert (this.neighbors.remove(cand)) : cand + " not in cache: " + neighbors;
+				assert (neighbors.remove(entryIndex) != null) : entryIndex + " not in cache: " + neighbors;
 			}
 
-			this.neighbors.add(newNeighbor);
+			newNeighbor.cacheEntryIndex = entryIndex;
+			neighbors.add(entryIndex, newNeighbor);
 		}
 
 		// INVARIANCE: cache size never exceeds maximum size
@@ -91,6 +94,9 @@ public class NeighborsCache {
 	 *
 	 */
 	public static class Neighbor implements Comparable<Neighbor> {
+
+		// Entry index inside the local cache
+		volatile int cacheEntryIndex;
 
 		Integer age;
 		ActorRef address;

@@ -24,10 +24,10 @@ public class GraphActor extends UntypedActor {
 		((TaskMessage) message).execute(g);
 	};
 
-	private static final BiConsumer<StatusMessage, GraphActor> PROCESS_NODE_STATUS = (StatusMessage message, GraphActor g) -> {
+	private static final BiConsumer<NodeActor.EndRoundMessage, GraphActor> PROCESS_NODE_END_ROUND = (NodeActor.EndRoundMessage message, GraphActor g) -> {
 		g.pendingNodes--;
 		if (g.pendingNodes == 0)
-			g.taskSender.tell(new StatusMessage(), g.getSelf());
+			g.taskSender.tell(new EndRoundMessage(), g.getSelf());
 	};
 
 	private static final BiConsumer<MeasureDataMessage, GraphActor> PROCESS_NODE_MEASURE = (MeasureDataMessage measure, GraphActor g) -> {
@@ -52,18 +52,13 @@ public class GraphActor extends UntypedActor {
 		}
 	};
 
-	private static Map<Integer, Integer> calcInDegreeDistr(MeasureDataMessage aggregatedMeasure2) {
-		// TODO Auto-generated method stub
-		return null;
-	}
-
 	static {
 		MATCHER.set(StartRoundMessage.class, PROCESS_CONTROL_TASK);
 		MATCHER.set(AddNodeMessage.class, PROCESS_CONTROL_TASK);
 		MATCHER.set(RemoveNodeMessage.class, PROCESS_CONTROL_TASK);
 		MATCHER.set(StartMeasureMessage.class, PROCESS_CONTROL_TASK);
 
-		MATCHER.set(StatusMessage.class, PROCESS_NODE_STATUS);
+		MATCHER.set(NodeActor.EndRoundMessage.class, PROCESS_NODE_END_ROUND);
 		MATCHER.set(MeasureDataMessage.class, PROCESS_NODE_MEASURE);
 	}
 
@@ -80,19 +75,40 @@ public class GraphActor extends UntypedActor {
 
 	public static class AddNodeMessage implements TaskMessage {
 
-		private final int cacheSize;
-		private final int shuffleLength;
-
-		public AddNodeMessage(int cacheSize, int shuffleLength) {
-			this.cacheSize = cacheSize;
-			this.shuffleLength = shuffleLength;
-		}
-
 		@Override
 		public void execute(UntypedActor a) {
 			GraphActor g = (GraphActor) a;
-			g.getContext().actorOf(Props.create(NodeActor.class, cacheSize, shuffleLength));
+			ActorRef newNode = g.getContext().actorOf(Props.create(NodeActor.class));
+			g.getSender().tell(new AddNodeEndedMessage(newNode), g.getSelf());
 		}
+	}
+
+	public static class AddNodeEndedMessage {
+
+		final ActorRef newNode;
+
+		public AddNodeEndedMessage(ActorRef newNode) {
+			this.newNode = newNode;
+		}
+
+	}
+
+	public static class InitNodeEndedMessage {
+
+	}
+
+	public static class InitNodeMessage {
+
+		final int cacheSize;
+		final int shuffleLength;
+		final ActorRef bootNeighbor;
+
+		public InitNodeMessage(int cacheSize, int shuffleLength, ActorRef bootNeighbor) {
+			this.cacheSize = cacheSize;
+			this.shuffleLength = shuffleLength;
+			this.bootNeighbor = bootNeighbor;
+		}
+
 	}
 
 	public static class RemoveNodeMessage implements TaskMessage {
@@ -116,6 +132,10 @@ public class GraphActor extends UntypedActor {
 			} else
 				((NodeActor) a).startProtocolRound();
 		}
+	}
+
+	public static class EndRoundMessage implements StatusMessage {
+
 	}
 
 	public static class StartMeasureMessage implements TaskMessage {

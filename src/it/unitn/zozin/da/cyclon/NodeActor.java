@@ -1,5 +1,6 @@
 package it.unitn.zozin.da.cyclon;
 
+import it.unitn.zozin.da.cyclon.GraphActor.InitNodeMessage;
 import it.unitn.zozin.da.cyclon.GraphActor.StartMeasureMessage;
 import it.unitn.zozin.da.cyclon.GraphActor.StartRoundMessage;
 import it.unitn.zozin.da.cyclon.Message.StatusMessage;
@@ -9,68 +10,29 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.function.BiConsumer;
-import akka.actor.ActorIdentity;
-import akka.actor.ActorRef;
-import akka.actor.Identify;
 import akka.actor.UntypedActor;
 
 public class NodeActor extends UntypedActor {
 
 	private static final MessageMatcher<NodeActor> MATCHER = MessageMatcher.getInstance();
 
-	private static final BiConsumer<TaskMessage, NodeActor> PROCESS_TASK = (TaskMessage message, NodeActor n) -> {
-		message.execute(n);
-	};
-
-	// TODO: Implement cyclon join protocol (Here boot is completed when we have
-	// a link with one neighbor)
-	private static final BiConsumer<ActorIdentity, NodeActor> PROCESS_JOIN_ANS = (ActorIdentity id, NodeActor n) -> {
-		ActorRef remoteActor = id.getRef();
-
-		// Ignore self identity
-		if (remoteActor.equals(n.getSelf()))
-			return;
-
-		if (n.bootCompleted)
-			return; // Boot completed: ignore other identities
-
-		if (n.cache.size() == 0) {
-			n.cache.updateNeighbors(Collections.singletonList(new Neighbor(0, remoteActor)), Collections.emptySet());
-		}
-
-		n.bootCompleted = true;
-		n.sendCyclonRequest();
-	};
-
-	private static final BiConsumer<CyclonNodeList, NodeActor> PROCESS_NODELIST = (CyclonNodeList nodeList, NodeActor n) -> {
-		if (nodeList.isRequest)
-			n.processCyclonRequest(nodeList);
-		else
-			n.processCyclonAnswer(nodeList);
-	};
-
 	static {
-		MATCHER.set(StartRoundMessage.class, PROCESS_TASK);
-		MATCHER.set(StartMeasureMessage.class, PROCESS_TASK);
-		MATCHER.set(ActorIdentity.class, PROCESS_JOIN_ANS);
-		MATCHER.set(CyclonNodeList.class, PROCESS_NODELIST);
+		MATCHER.set(InitNodeMessage.class, NodeActor::processInitNode);
+		MATCHER.set(StartRoundMessage.class, NodeActor::processTask);
+		MATCHER.set(StartMeasureMessage.class, NodeActor::processTask);
+		MATCHER.set(CyclonNodeList.class, NodeActor::processNodeList);
+		MATCHER.set(CyclonJoin.class, NodeActor::processJoinReq);
 	}
 
-	private final int shuffleLength;
+	private Neighbor selfAddress;
+	private int shuffleLength;
 
 	private int round = 0;
-	private boolean bootCompleted = false;
+	NeighborsCache cache;
+	private Set<Integer> replaceableEntries;
 
-	final NeighborsCache cache;
-
-	private Neighbor selfAddress;
-	private Set<Neighbor> replaceableEntries;
-
-	public NodeActor(int cacheSize, int shuffleLength) {
-		cache = new NeighborsCache(cacheSize);
-		this.shuffleLength = shuffleLength;
-		replaceableEntries = new HashSet<Neighbor>(shuffleLength);
+	public NodeActor() {
+		replaceableEntries = new HashSet<Integer>();
 	}
 
 	@Override
@@ -83,6 +45,31 @@ public class NodeActor extends UntypedActor {
 		MATCHER.process(message, this);
 	}
 
+	private static void processInitNode(InitNodeMessage message, NodeActor n) {
+		n.cache = new NeighborsCache(message.cacheSize);
+		n.shuffleLength = message.shuffleLength;
+
+		// Initialize cache with the boot neighbor
+		n.cache.updateNeighbors(Collections.singletonList(new Neighbor(0, message.bootNeighbor)), Collections.emptySet());
+
+		n.getSender().tell(new GraphActor.InitNodeEndedMessage(), n.getSelf());
+	}
+
+	private static void processNodeList(CyclonNodeList nodeList, NodeActor n) {
+		if (nodeList.isRequest)
+			n.processCyclonRequest(nodeList);
+		else
+			n.processCyclonAnswer(nodeList);
+	}
+
+	private static void processTask(TaskMessage message, NodeActor n) {
+		message.execute(n);
+	}
+
+	private static void processJoinReq(CyclonJoin joinReq, NodeActor n) {
+		// TODO: Implement cyclon join protocol
+	}
+
 	public void startProtocolRound() {
 		if (cache.size() == 0) {
 			performBoot();
@@ -93,10 +80,9 @@ public class NodeActor extends UntypedActor {
 
 	private void performBoot() {
 		// TODO: implement cyclon join protocol
-		getContext().actorSelection("../*").tell(new Identify(null), getSelf());
 	}
 
-	public void sendCyclonRequest() {
+	private void sendCyclonRequest() {
 		cache.increaseNeighborsAge();
 
 		Neighbor dest = cache.getOldestNeighbor();
@@ -105,37 +91,16 @@ public class NodeActor extends UntypedActor {
 		List<Neighbor> requestNodes = cache.getRandomNeighbors(shuffleLength - 1, dest);
 
 		// Cache entries that can be replaced when the answer to this request is
-		// received
-		replaceableEntries.clear();
-		replaceableEntries.addAll(requestNodes);
-		replaceableEntries.add(dest);
+		// received (nodes listed in request + dest node)
+		requestNodes.stream().forEach((n) -> replaceableEntries.add(n.cacheEntryIndex));
+		replaceableEntries.add(dest.cacheEntryIndex);
 
 		// Add fresh local node address
 		requestNodes.add(selfAddress);
 
 		dest.address.tell(new CyclonNodeList(requestNodes, true), getSelf());
 
-		// TODO: end round also on answer timeout
-	}
-
-	private void processCyclonRequest(CyclonNodeList req) {
-		// Remove itself (if present)
-		req.nodes.remove(selfAddress);
-
-		// Prepare answer and save received nodes in cache
-		List<Neighbor> ansNodes = cache.getRandomNeighbors(shuffleLength);
-
-		cache.updateNeighbors(req.nodes, new HashSet<NeighborsCache.Neighbor>(ansNodes));
-
-		// Handle special case in which a request arrives while the local node
-		// is waiting for an answer to its own request. In this case the entries
-		// that can can be replaced when the answer arrives correspond to the
-		// new entries just stored in the cache with this request.
-		replaceableEntries.removeAll(ansNodes);
-		replaceableEntries.addAll(req.nodes);
-
-		// Send answer
-		getSender().tell(new CyclonNodeList(ansNodes, false), getSelf());
+		// FIXME: end round also on answer timeout
 	}
 
 	private void processCyclonAnswer(CyclonNodeList answer) {
@@ -150,9 +115,34 @@ public class NodeActor extends UntypedActor {
 	}
 
 	private void sendRoundCompletedStatus() {
-		System.out.println(round + " " + getSelf().path().name() + " CACHE: " + cache);
+		replaceableEntries.clear();
 		round++;
-		getContext().parent().tell(new StatusMessage(), getSelf());
+		getContext().parent().tell(new EndRoundMessage(), getSelf());
+	}
+
+	private void processCyclonRequest(CyclonNodeList req) {
+		// Remove itself (if present)
+		req.nodes.remove(selfAddress);
+
+		// Prepare answer and save received nodes in cache
+		List<Neighbor> ansNodes = cache.getRandomNeighbors(shuffleLength);
+
+		// Handle special case in which a request arrives while the local node
+		// is waiting for an answer to its own request. In this case the entries
+		// that can can be replaced when the answer arrives correspond to the
+		// new entries just stored in the cache with this request.
+		ansNodes.stream().forEach((n) -> replaceableEntries.add(n.cacheEntryIndex));
+
+		cache.updateNeighbors(req.nodes, replaceableEntries);
+
+		req.nodes.stream().forEach((n) -> replaceableEntries.add(n.cacheEntryIndex));
+
+		// Send answer
+		getSender().tell(new CyclonNodeList(ansNodes, false), getSelf());
+	}
+
+	public static class EndRoundMessage implements StatusMessage {
+
 	}
 
 	public static class CyclonNodeList {

@@ -1,9 +1,16 @@
 package it.unitn.zozin.da.cyclon;
 
+import it.unitn.zozin.da.cyclon.ControlActor.Configuration.Topology;
+import it.unitn.zozin.da.cyclon.GraphActor.AddNodeEndedMessage;
+import it.unitn.zozin.da.cyclon.GraphActor.AddNodeMessage;
+import it.unitn.zozin.da.cyclon.GraphActor.EndRoundMessage;
+import it.unitn.zozin.da.cyclon.GraphActor.InitNodeEndedMessage;
+import it.unitn.zozin.da.cyclon.GraphActor.InitNodeMessage;
 import it.unitn.zozin.da.cyclon.GraphActor.MeasureMessage.SimulationDataMessage;
 import it.unitn.zozin.da.cyclon.GraphActor.StartMeasureMessage;
 import it.unitn.zozin.da.cyclon.GraphActor.StartRoundMessage;
-import it.unitn.zozin.da.cyclon.Message.StatusMessage;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.BiConsumer;
 import akka.actor.ActorPath;
 import akka.actor.ActorRef;
@@ -22,7 +29,7 @@ class ControlActor extends UntypedActor {
 		c.startSimulation();
 	};
 
-	private static final BiConsumer<StatusMessage, ControlActor> PROCESS_ROUND_END = (StatusMessage status, ControlActor c) -> {
+	private static final BiConsumer<EndRoundMessage, ControlActor> PROCESS_ROUND_END = (EndRoundMessage status, ControlActor c) -> {
 		c.runSimulationRound();
 
 	};
@@ -33,16 +40,31 @@ class ControlActor extends UntypedActor {
 		// Start next round
 
 	};
+	private static final BiConsumer<AddNodeEndedMessage, ControlActor> PROCESS_NODE_ADDED = (AddNodeEndedMessage message, ControlActor c) -> {
+		c.newNodes.add(message.newNode);
+		if (c.newNodes.size() == c.conf.NODES)
+			c.initNodes();
+	};
+
+	private static final BiConsumer<InitNodeEndedMessage, ControlActor> PROCESS_NODE_INITIALIZED = (InitNodeEndedMessage message, ControlActor c) -> {
+		c.pendingNodes--;
+		if (c.pendingNodes == 0)
+			c.runSimulationRound();
+	};
 
 	static {
 		MATCHER.set(Configuration.class, PROCESS_CONF);
-		MATCHER.set(StatusMessage.class, PROCESS_ROUND_END);
+		MATCHER.set(AddNodeEndedMessage.class, PROCESS_NODE_ADDED);
+		MATCHER.set(InitNodeEndedMessage.class, PROCESS_NODE_INITIALIZED);
+		MATCHER.set(EndRoundMessage.class, PROCESS_ROUND_END);
 		MATCHER.set(SimulationDataMessage.class, PROCESS_MEASURE_DATA);
 	}
 
 	private Configuration conf;
 	private ActorRef sender;
 
+	private List<ActorRef> newNodes = new ArrayList<ActorRef>();
+	private int pendingNodes;
 	private int remainingRounds;
 
 	@Override
@@ -59,7 +81,44 @@ class ControlActor extends UntypedActor {
 	private void startSimulation() {
 		addNodes(conf.NODES);
 		remainingRounds = conf.ROUNDS;
-		runSimulationRound();
+	}
+
+	private void addNodes(int nodes) {
+		ActorSelection g = getContext().actorSelection(GRAPH);
+
+		for (int i = 0; i < nodes; i++) {
+			AddNodeMessage msg = new GraphActor.AddNodeMessage();
+			g.tell(msg, getSelf());
+		}
+	}
+
+	private void initNodes() {
+		pendingNodes = newNodes.size();
+		for (ActorRef node : newNodes) {
+			ActorRef bootNode = getBootNeighbor(node);
+			InitNodeMessage initMsg = new GraphActor.InitNodeMessage(conf.CYCLON_CACHE_SIZE, conf.CYCLON_SHUFFLE_LENGTH, bootNode);
+			node.tell(initMsg, getSelf());
+		}
+	}
+
+	/**
+	 * Determine which node the given node as to use as boot neighbor
+	 * 
+	 * @param node
+	 * @return
+	 */
+	private ActorRef getBootNeighbor(ActorRef node) {
+		if (conf.BOOT_TOPOLOGY == Topology.CHAIN) {
+			int bootIdx = newNodes.indexOf(node) - 1;
+
+			if (bootIdx == -1)
+				bootIdx = newNodes.size() - 1;
+
+			return newNodes.get(bootIdx);
+		} else {
+			// Star topology on first node
+			return newNodes.get(0);
+		}
 	}
 
 	private void runSimulationRound() {
@@ -73,12 +132,6 @@ class ControlActor extends UntypedActor {
 		addNodes(conf.NODE_ADD);
 
 		executeProtocolRound();
-	}
-
-	private void addNodes(int nodes) {
-		ActorSelection g = getContext().actorSelection(GRAPH);
-		for (int i = 0; i < nodes; i++)
-			g.tell(new GraphActor.AddNodeMessage(conf.CYCLON_CACHE_SIZE, conf.CYCLON_SHUFFLE_LENGTH), getSelf());
 	}
 
 	private void removeNodes(int nodes) {
@@ -100,6 +153,11 @@ class ControlActor extends UntypedActor {
 	// Simulation params
 	public static class Configuration {
 
+		enum Topology {
+			CHAIN, STAR
+		};
+
+		public Topology BOOT_TOPOLOGY;
 		int NODES;
 		int ROUNDS;
 		int NODE_ADD;
