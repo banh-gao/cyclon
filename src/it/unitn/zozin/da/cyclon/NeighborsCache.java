@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Random;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import akka.actor.ActorRef;
 
 public class NeighborsCache {
@@ -56,7 +57,7 @@ public class NeighborsCache {
 
 		List<Neighbor> neighbors = out.subList(0, Math.min(shuffleLength, out.size()));
 
-		neighbors.stream().forEach((n) -> replaceableEntries.add(n.cacheEntryIndex));
+		neighbors.stream().forEach((n) -> replaceableEntries.add(cache.indexOf(n)));
 
 		return neighbors;
 	}
@@ -66,8 +67,7 @@ public class NeighborsCache {
 		Iterator<Integer> replaceableEntriesIter = replaceableEntries.iterator();
 
 		Iterator<Integer> overwritableIter = null;
-		Set<Integer> overwritable = cache.stream().map((n) -> n.cacheEntryIndex).collect(Collectors.toSet());
-
+		Set<Integer> overwritable = IntStream.range(0, cache.size()).boxed().collect(Collectors.toSet());
 		overwritable.removeAll(replaceableEntries);
 		overwritableIter = overwritable.iterator();
 
@@ -90,7 +90,6 @@ public class NeighborsCache {
 				assert (cache.remove(entryIndex) != null) : entryIndex + " not in cache: " + cache;
 			}
 
-			newNeighbor.cacheEntryIndex = entryIndex;
 			cache.add(entryIndex, newNeighbor);
 		}
 
@@ -111,11 +110,8 @@ public class NeighborsCache {
 	 */
 	public static class Neighbor implements Comparable<Neighbor>, Cloneable {
 
-		// Entry index inside the local cache
-		int cacheEntryIndex;
-
 		Integer age;
-		ActorRef address;
+		final ActorRef address;
 
 		public Neighbor(int age, ActorRef address) {
 			this.age = age;
@@ -124,7 +120,7 @@ public class NeighborsCache {
 
 		@Override
 		public String toString() {
-			return cacheEntryIndex + " (" + age + ", " + address.path().name() + ")";
+			return "(" + age + ", " + address.path().name() + ")";
 		}
 
 		@Override

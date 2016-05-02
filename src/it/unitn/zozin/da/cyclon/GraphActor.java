@@ -1,13 +1,10 @@
 package it.unitn.zozin.da.cyclon;
 
-import it.unitn.zozin.da.cyclon.GraphActor.MeasureMessage.MeasureDataMessage;
-import it.unitn.zozin.da.cyclon.GraphActor.MeasureMessage.SimulationDataMessage;
 import it.unitn.zozin.da.cyclon.Message.StatusMessage;
 import it.unitn.zozin.da.cyclon.Message.TaskMessage;
-import it.unitn.zozin.da.cyclon.NeighborsCache.Neighbor;
-import java.util.HashMap;
+import it.unitn.zozin.da.cyclon.StartMeasureMessage.MeasureDataMessage;
+import it.unitn.zozin.da.cyclon.StartMeasureMessage.SimulationDataMessage;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.TreeMap;
 import java.util.function.BiConsumer;
 import akka.actor.ActorRef;
@@ -34,7 +31,7 @@ public class GraphActor extends UntypedActor {
 		g.aggregatedMeasure.aggregate(measure);
 		g.pendingNodes--;
 		if (g.pendingNodes == 0) {
-
+			System.out.println(g.aggregatedMeasure.inDegree);
 			// Calculate in-degree distribution
 			int unreachedNodes = g.aggregatedMeasure.totalNodes;
 			Map<Integer, Integer> inDegreeDist = new TreeMap<Integer, Integer>();
@@ -61,10 +58,10 @@ public class GraphActor extends UntypedActor {
 	}
 
 	// Task processing state
-	private int pendingNodes = 0;
+	int pendingNodes = 0;
 	private ActorRef taskSender;
 
-	private MeasureDataMessage aggregatedMeasure;
+	MeasureDataMessage aggregatedMeasure;
 
 	@Override
 	public void onReceive(Object message) throws Exception {
@@ -134,76 +131,5 @@ public class GraphActor extends UntypedActor {
 
 	public static class EndRoundMessage implements StatusMessage {
 
-	}
-
-	public static class StartMeasureMessage implements TaskMessage {
-
-		@Override
-		public void execute(UntypedActor a) {
-			if (a instanceof GraphActor) {
-				GraphActor g = (GraphActor) a;
-				g.aggregatedMeasure = new MeasureDataMessage();
-				for (ActorRef c : g.getContext().getChildren()) {
-					g.pendingNodes++;
-					c.tell(this, g.getSelf());
-				}
-			} else
-				a.getSender().tell(measureNode((NodeActor) a), a.getSelf());
-		}
-
-		private MeasureDataMessage measureNode(NodeActor n) {
-			MeasureDataMessage m = new MeasureDataMessage();
-
-			m.incrementNodeCounter();
-
-			for (Neighbor neighbor : n.cache.getNeighbors())
-				m.incrementInDegree(neighbor.address);
-
-			return m;
-		}
-	}
-
-	public static class MeasureMessage {
-
-		public static class MeasureDataMessage {
-
-			final Map<ActorRef, Integer> inDegree = new HashMap<ActorRef, Integer>();
-
-			int totalNodes = 0;
-
-			public void incrementNodeCounter() {
-				totalNodes++;
-			}
-
-			public void incrementInDegree(ActorRef node) {
-				int v = inDegree.getOrDefault(node, 0);
-				inDegree.put(node, v + 1);
-			}
-
-			public void aggregate(MeasureDataMessage msg) {
-				totalNodes += msg.totalNodes;
-				for (Entry<ActorRef, Integer> e : msg.inDegree.entrySet()) {
-					int v = inDegree.getOrDefault(e.getKey(), 0);
-					inDegree.put(e.getKey(), v + e.getValue());
-				}
-			}
-		}
-
-		public static class SimulationDataMessage {
-
-			private final Map<Integer, Integer> degreeDistr;
-			private final int totalNodes;
-
-			public SimulationDataMessage(int totalNodes, Map<Integer, Integer> degreeDistr) {
-				this.totalNodes = totalNodes;
-				this.degreeDistr = degreeDistr;
-			}
-
-			@Override
-			public String toString() {
-				return "SimulationDataMessage [degreeDistr=" + degreeDistr + ", totalNodes=" + totalNodes + "]";
-			}
-
-		}
 	}
 }

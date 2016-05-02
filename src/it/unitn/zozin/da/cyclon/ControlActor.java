@@ -6,11 +6,10 @@ import it.unitn.zozin.da.cyclon.GraphActor.AddNodeMessage;
 import it.unitn.zozin.da.cyclon.GraphActor.EndRoundMessage;
 import it.unitn.zozin.da.cyclon.GraphActor.InitNodeEndedMessage;
 import it.unitn.zozin.da.cyclon.GraphActor.InitNodeMessage;
-import it.unitn.zozin.da.cyclon.GraphActor.MeasureMessage.SimulationDataMessage;
-import it.unitn.zozin.da.cyclon.GraphActor.StartMeasureMessage;
 import it.unitn.zozin.da.cyclon.GraphActor.StartRoundMessage;
-import java.util.ArrayList;
-import java.util.List;
+import it.unitn.zozin.da.cyclon.StartMeasureMessage.SimulationDataMessage;
+import java.util.NavigableSet;
+import java.util.TreeSet;
 import java.util.function.BiConsumer;
 import akka.actor.ActorPath;
 import akka.actor.ActorRef;
@@ -23,49 +22,26 @@ class ControlActor extends UntypedActor {
 
 	private static final MessageMatcher<ControlActor> MATCHER = MessageMatcher.getInstance();
 
-	private static final BiConsumer<Configuration, ControlActor> PROCESS_CONF = (Configuration conf, ControlActor c) -> {
-		c.conf = conf;
-		c.sender = c.getSender();
-		c.startSimulation();
-	};
-
-	private static final BiConsumer<EndRoundMessage, ControlActor> PROCESS_ROUND_END = (EndRoundMessage status, ControlActor c) -> {
-		c.runSimulationRound();
-
-	};
-
 	private static final BiConsumer<SimulationDataMessage, ControlActor> PROCESS_MEASURE_DATA = (SimulationDataMessage data, ControlActor c) -> {
-		// TODO: aggregate per round
+		System.out.println(c.nodes);
 		c.sender.tell(data, c.getSelf());
-		// Start next round
-
-	};
-	private static final BiConsumer<AddNodeEndedMessage, ControlActor> PROCESS_NODE_ADDED = (AddNodeEndedMessage message, ControlActor c) -> {
-		c.newNodes.add(message.newNode);
-		if (c.newNodes.size() == c.conf.NODES)
-			c.initNodes();
-	};
-
-	private static final BiConsumer<InitNodeEndedMessage, ControlActor> PROCESS_NODE_INITIALIZED = (InitNodeEndedMessage message, ControlActor c) -> {
-		c.pendingNodes--;
-		if (c.pendingNodes == 0)
-			c.runSimulationRound();
 	};
 
 	static {
-		MATCHER.set(Configuration.class, PROCESS_CONF);
-		MATCHER.set(AddNodeEndedMessage.class, PROCESS_NODE_ADDED);
-		MATCHER.set(InitNodeEndedMessage.class, PROCESS_NODE_INITIALIZED);
-		MATCHER.set(EndRoundMessage.class, PROCESS_ROUND_END);
+		MATCHER.set(Configuration.class, ControlActor::processConf);
+		MATCHER.set(AddNodeEndedMessage.class, ControlActor::processNodeAdded);
+		MATCHER.set(AddNodeEndedMessage.class, ControlActor::processNodeRemoved);
+		MATCHER.set(InitNodeEndedMessage.class, ControlActor::processNodeInitialized);
+		MATCHER.set(EndRoundMessage.class, ControlActor::processRoundEnded);
 		MATCHER.set(SimulationDataMessage.class, PROCESS_MEASURE_DATA);
 	}
 
 	private Configuration conf;
 	private ActorRef sender;
 
-	private List<ActorRef> newNodes = new ArrayList<ActorRef>();
+	private NavigableSet<ActorRef> nodes = new TreeSet<ActorRef>();
 	private int pendingNodes;
-	private int remainingRounds;
+	private int round;
 
 	@Override
 	public void preStart() throws Exception {
@@ -78,23 +54,49 @@ class ControlActor extends UntypedActor {
 		MATCHER.process(message, this);
 	}
 
-	private void startSimulation() {
-		addNodes(conf.NODES);
-		remainingRounds = conf.ROUNDS;
+	private static void processConf(Configuration conf, ControlActor c) {
+		c.conf = conf;
+		c.sender = c.getSender();
+		c.round = 0;
+
+		c.prepareSimulationRound();
+	}
+
+	private void prepareSimulationRound() {
+		if (round >= conf.ROUNDS) {
+			executeMeasure();
+			return;
+		}
+
+		// Init only for first round
+		if (round == 0) {
+			addNodes(conf.NODES);
+			return;
+		}
+
+		removeNodes(conf.NODE_REM);
+		addNodes(conf.NODE_ADD);
 	}
 
 	private void addNodes(int nodes) {
 		ActorSelection g = getContext().actorSelection(GRAPH);
-
+		pendingNodes = nodes;
 		for (int i = 0; i < nodes; i++) {
 			AddNodeMessage msg = new GraphActor.AddNodeMessage();
 			g.tell(msg, getSelf());
 		}
 	}
 
+	private static void processNodeAdded(AddNodeEndedMessage message, ControlActor c) {
+		c.pendingNodes--;
+		c.nodes.add(message.newNode);
+		if (c.pendingNodes == 0)
+			c.initNodes();
+	}
+
 	private void initNodes() {
-		pendingNodes = newNodes.size();
-		for (ActorRef node : newNodes) {
+		pendingNodes = nodes.size();
+		for (ActorRef node : nodes) {
 			ActorRef bootNode = getBootNeighbor(node);
 			InitNodeMessage initMsg = new GraphActor.InitNodeMessage(conf.CYCLON_CACHE_SIZE, conf.CYCLON_SHUFFLE_LENGTH, bootNode);
 			node.tell(initMsg, getSelf());
@@ -109,29 +111,28 @@ class ControlActor extends UntypedActor {
 	 */
 	private ActorRef getBootNeighbor(ActorRef node) {
 		if (conf.BOOT_TOPOLOGY == Topology.CHAIN) {
-			int bootIdx = newNodes.indexOf(node) - 1;
+			ActorRef bootIdx = nodes.higher(node);
 
-			if (bootIdx == -1)
-				bootIdx = newNodes.size() - 1;
+			if (bootIdx == null)
+				bootIdx = nodes.first();
 
-			return newNodes.get(bootIdx);
+			return bootIdx;
 		} else {
 			// Star topology on first node
-			return newNodes.get(0);
+			return nodes.first();
 		}
 	}
 
-	private void runSimulationRound() {
-		if (remainingRounds == 0) {
-			executeMeasure();
-			return;
-		}
-		remainingRounds--;
+	private static void processNodeInitialized(InitNodeEndedMessage message, ControlActor c) {
+		c.pendingNodes--;
+		if (c.pendingNodes == 0)
+			c.executeProtocolRound();
+	}
 
-		removeNodes(conf.NODE_REM);
-		addNodes(conf.NODE_ADD);
-
-		executeProtocolRound();
+	private static void processRoundEnded(EndRoundMessage status, ControlActor c) {
+		System.out.println("Completed round " + c.round);
+		c.round++;
+		c.prepareSimulationRound();
 	}
 
 	private void removeNodes(int nodes) {
@@ -140,7 +141,13 @@ class ControlActor extends UntypedActor {
 			g.tell(new GraphActor.RemoveNodeMessage(), getSelf());
 	}
 
+	private static void processNodeRemoved(AddNodeEndedMessage message, ControlActor c) {
+		c.pendingNodes--;
+		c.nodes.remove(message.newNode);
+	}
+
 	private void executeProtocolRound() {
+		System.out.println("Starting round " + round + "... ");
 		ActorSelection g = getContext().actorSelection(GRAPH);
 		g.tell(new StartRoundMessage(), getSelf());
 	}
