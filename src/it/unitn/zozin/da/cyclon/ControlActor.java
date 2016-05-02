@@ -30,7 +30,8 @@ class ControlActor extends UntypedActor {
 	static {
 		MATCHER.set(Configuration.class, ControlActor::processConf);
 		MATCHER.set(AddNodeEndedMessage.class, ControlActor::processNodeAdded);
-		MATCHER.set(AddNodeEndedMessage.class, ControlActor::processNodeRemoved);
+		// MATCHER.set(RemoveNodeEndedMessage.class,
+		// ControlActor::processNodeRemoved);
 		MATCHER.set(InitNodeEndedMessage.class, ControlActor::processNodeInitialized);
 		MATCHER.set(EndRoundMessage.class, ControlActor::processRoundEnded);
 		MATCHER.set(SimulationDataMessage.class, PROCESS_MEASURE_DATA);
