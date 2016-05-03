@@ -114,6 +114,16 @@ public class GraphActor extends UntypedActor {
 		}
 	}
 
+	public static class RemoveNodeEndedMessage {
+
+		final ActorRef removedNode;
+
+		public RemoveNodeEndedMessage(ActorRef removedNode) {
+			this.removedNode = removedNode;
+		}
+
+	}
+
 	public static class StartRoundMessage implements TaskMessage {
 
 		@Override
