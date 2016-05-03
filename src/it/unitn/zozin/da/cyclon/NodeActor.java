@@ -1,77 +1,87 @@
 package it.unitn.zozin.da.cyclon;
 
-import it.unitn.zozin.da.cyclon.GraphActor.InitNodeMessage;
-import it.unitn.zozin.da.cyclon.GraphActor.StartRoundMessage;
-import it.unitn.zozin.da.cyclon.Message.StatusMessage;
-import it.unitn.zozin.da.cyclon.Message.TaskMessage;
 import it.unitn.zozin.da.cyclon.NeighborsCache.Neighbor;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
-import akka.actor.UntypedActor;
+import java.util.Map;
+import java.util.Map.Entry;
+import akka.actor.AbstractFSM;
+import akka.actor.ActorRef;
 
-public class NodeActor extends UntypedActor {
+public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData> {
 
-	private static final MessageMatcher<NodeActor> MATCHER = MessageMatcher.getInstance();
+	enum State {
+		Uninitialized, Ready
+	}
 
-	static {
-		MATCHER.set(InitNodeMessage.class, NodeActor::processInitNode);
-		MATCHER.set(StartRoundMessage.class, NodeActor::processTask);
-		MATCHER.set(StartMeasureMessage.class, NodeActor::processTask);
-		MATCHER.set(CyclonNodeList.class, NodeActor::processNodeList);
-		MATCHER.set(CyclonJoin.class, NodeActor::processJoinReq);
+	interface StateData {
+
+	}
+
+	private enum Uninitialized implements StateData {
+		Uninitialized
+	}
+
+	{
+		startWith(State.Uninitialized, Uninitialized.Uninitialized);
+
+		when(State.Uninitialized, matchEvent(InitNodeMessage.class, (initMsg, data) -> processInitNode(initMsg)));
+		when(State.Ready, matchEvent(StartRoundMessage.class, (startRoundMsg, data) -> processStartRound()));
+		when(State.Ready, matchEvent(StartMeasureMessage.class, (startMeasureMsg, data) -> processMeasureRequest()));
+
+		when(State.Ready, matchEvent(CyclonNodeList.class, (nodeListMsg, data) -> processNodeList(nodeListMsg)));
+		when(State.Ready, matchEvent(CyclonJoin.class, (joinMsg, data) -> processJoinReq(joinMsg)));
 	}
 
 	private Neighbor selfAddress;
-	private int shuffleLength;
 
-	NeighborsCache cache;
+	private NeighborsCache cache;
+	private int shuffleLength;
 
 	@Override
 	public void preStart() throws Exception {
-		this.selfAddress = new Neighbor(0, getSelf());
+		this.selfAddress = new Neighbor(0, self());
 	}
 
-	@Override
-	public void onReceive(Object message) throws Exception {
-		MATCHER.process(message, this);
-	}
-
-	private static void processInitNode(InitNodeMessage message, NodeActor n) {
-		n.cache = new NeighborsCache(message.cacheSize);
-		n.shuffleLength = message.shuffleLength;
+	private akka.actor.FSM.State<State, StateData> processInitNode(InitNodeMessage message) {
+		cache = new NeighborsCache(message.cacheSize);
+		shuffleLength = message.shuffleLength;
 
 		// Initialize cache with the boot neighbor
-		n.cache.updateNeighbors(Collections.singletonList(new Neighbor(0, message.bootNeighbor)), false);
+		cache.updateNeighbors(Collections.singletonList(new Neighbor(0, message.bootNeighbor)), false);
 
-		n.getSender().tell(new GraphActor.InitNodeEndedMessage(), n.getSelf());
+		sender().tell(new GraphActor.InitNodeEndedMessage(), self());
+		return goTo(State.Ready);
 	}
 
-	private static void processNodeList(CyclonNodeList nodeList, NodeActor n) {
-		if (nodeList.isRequest)
-			n.processCyclonRequest(nodeList);
-		else
-			n.processCyclonAnswer(nodeList);
-	}
-
-	private static void processTask(TaskMessage message, NodeActor n) {
-		message.execute(n);
-	}
-
-	private static void processJoinReq(CyclonJoin joinReq, NodeActor n) {
-		// TODO: Implement cyclon join protocol
-	}
-
-	public void startProtocolRound() {
+	public akka.actor.FSM.State<State, StateData> processStartRound() {
 		if (cache.size() == 0) {
+			// FIXME: run only on the first round of the node
 			performBoot();
 		} else {
 			sendCyclonRequest();
 		}
+		return goTo(State.Ready);
 	}
 
 	private void performBoot() {
 		// TODO: implement cyclon join protocol
+	}
+
+	private akka.actor.FSM.State<State, StateData> processNodeList(CyclonNodeList nodeList) {
+		if (nodeList.isRequest)
+			processCyclonRequest(nodeList);
+		else
+			processCyclonAnswer(nodeList);
+
+		return stay();
+	}
+
+	private akka.actor.FSM.State<State, StateData> processJoinReq(CyclonJoin joinReq) {
+		// TODO: Implement cyclon join protocol
+		return stay();
 	}
 
 	private void sendCyclonRequest() {
@@ -85,7 +95,7 @@ public class NodeActor extends UntypedActor {
 		// Add fresh local node address
 		requestNodes.add(selfAddress);
 
-		dest.address.tell(new CyclonNodeList(requestNodes, true), getSelf());
+		dest.address.tell(new CyclonNodeList(requestNodes, true), self());
 
 		// FIXME: end round also on answer timeout
 	}
@@ -102,7 +112,7 @@ public class NodeActor extends UntypedActor {
 	}
 
 	private void sendRoundCompletedStatus() {
-		getContext().parent().tell(new EndRoundMessage(), getSelf());
+		context().parent().tell(new EndRoundMessage(), self());
 	}
 
 	private void processCyclonRequest(CyclonNodeList req) {
@@ -120,10 +130,41 @@ public class NodeActor extends UntypedActor {
 		cache.updateNeighbors(req.nodes, true);
 
 		// Send answer
-		getSender().tell(new CyclonNodeList(ansNodes, false), getSelf());
+		sender().tell(new CyclonNodeList(ansNodes, false), self());
 	}
 
-	public static class EndRoundMessage implements StatusMessage {
+	private akka.actor.FSM.State<State, StateData> processMeasureRequest() {
+		MeasureDataMessage m = new MeasureDataMessage();
+
+		m.incrementNodeCounter();
+
+		for (Neighbor neighbor : cache.getNeighbors())
+			m.incrementInDegree(neighbor.address);
+
+		sender().tell(m, self());
+
+		return stay();
+	}
+
+	public static class InitNodeMessage {
+
+		final int cacheSize;
+		final int shuffleLength;
+		final ActorRef bootNeighbor;
+
+		public InitNodeMessage(int cacheSize, int shuffleLength, ActorRef bootNeighbor) {
+			this.cacheSize = cacheSize;
+			this.shuffleLength = shuffleLength;
+			this.bootNeighbor = bootNeighbor;
+		}
+
+	}
+
+	public static class StartRoundMessage {
+
+	}
+
+	public static class EndRoundMessage {
 
 	}
 
@@ -142,5 +183,33 @@ public class NodeActor extends UntypedActor {
 
 	public static class CyclonJoin {
 
+	}
+
+	public static class StartMeasureMessage {
+
+	}
+
+	public static class MeasureDataMessage {
+
+		final Map<ActorRef, Integer> inDegree = new HashMap<ActorRef, Integer>();
+
+		int totalNodes = 0;
+
+		public void incrementNodeCounter() {
+			totalNodes++;
+		}
+
+		public void incrementInDegree(ActorRef node) {
+			int v = inDegree.getOrDefault(node, 0);
+			inDegree.put(node, v + 1);
+		}
+
+		public void aggregate(MeasureDataMessage msg) {
+			totalNodes += msg.totalNodes;
+			for (Entry<ActorRef, Integer> e : msg.inDegree.entrySet()) {
+				int v = inDegree.getOrDefault(e.getKey(), 0);
+				inDegree.put(e.getKey(), v + e.getValue());
+			}
+		}
 	}
 }

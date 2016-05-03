@@ -1,41 +1,106 @@
 package it.unitn.zozin.da.cyclon;
 
-import it.unitn.zozin.da.cyclon.Message.StatusMessage;
-import it.unitn.zozin.da.cyclon.Message.TaskMessage;
-import it.unitn.zozin.da.cyclon.StartMeasureMessage.MeasureDataMessage;
-import it.unitn.zozin.da.cyclon.StartMeasureMessage.SimulationDataMessage;
+import it.unitn.zozin.da.cyclon.NodeActor.MeasureDataMessage;
 import java.util.Map;
 import java.util.TreeMap;
-import java.util.function.BiConsumer;
+import scala.collection.JavaConversions;
+import akka.actor.AbstractFSM;
 import akka.actor.ActorRef;
 import akka.actor.PoisonPill;
 import akka.actor.Props;
-import akka.actor.UntypedActor;
 
-public class GraphActor extends UntypedActor {
+public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateData> {
 
-	private static final MessageMatcher<GraphActor> MATCHER = MessageMatcher.getInstance();
+	enum State {
+		Idle, RoundRunning, MeasureRunning
+	}
 
-	private static final BiConsumer<TaskMessage, GraphActor> PROCESS_CONTROL_TASK = (TaskMessage message, GraphActor g) -> {
-		g.taskSender = g.getSender();
-		((TaskMessage) message).execute(g);
-	};
+	interface StateData {
 
-	private static final BiConsumer<NodeActor.EndRoundMessage, GraphActor> PROCESS_NODE_END_ROUND = (NodeActor.EndRoundMessage message, GraphActor g) -> {
-		g.pendingNodes--;
-		if (g.pendingNodes == 0)
-			g.taskSender.tell(new EndRoundMessage(), g.getSelf());
-	};
+	}
 
-	private static final BiConsumer<MeasureDataMessage, GraphActor> PROCESS_NODE_MEASURE = (MeasureDataMessage measure, GraphActor g) -> {
-		g.aggregatedMeasure.aggregate(measure);
-		g.pendingNodes--;
-		if (g.pendingNodes == 0) {
-			System.out.println(g.aggregatedMeasure.inDegree);
+	private enum Uninitialized implements StateData {
+		Uninitialized
+	}
+
+	class NodesCount implements StateData {
+
+		int nodes;
+
+		public NodesCount(int nodes) {
+			super();
+			this.nodes = nodes;
+		}
+
+	}
+
+	{
+		startWith(State.Idle, Uninitialized.Uninitialized);
+
+		when(State.Idle, matchEvent(RemoveNodeMessage.class, (removeNodeMsg, data) -> processRemoveNode()));
+		when(State.Idle, matchEvent(AddNodeMessage.class, (addNodeMsg, data) -> processAddNode()));
+
+		when(State.Idle, matchEvent(StartRoundMessage.class, (startRoundMsg, data) -> startRound()));
+		when(State.RoundRunning, matchEvent(NodeActor.EndRoundMessage.class, NodesCount.class, (endRoundMsg, nodesCount) -> processEndRound(nodesCount)));
+
+		when(State.Idle, matchEvent(StartMeasureMessage.class, (startMeasureMsg, data) -> startMeasure()));
+		when(State.MeasureRunning, matchEvent(NodeActor.MeasureDataMessage.class, NodesCount.class, (measureDataMsg, nodesCount) -> processNodeMeasure(measureDataMsg, nodesCount)));
+	}
+
+	// Task processing state
+	private ActorRef taskSender;
+
+	MeasureDataMessage aggregatedMeasure;
+
+	private akka.actor.FSM.State<State, StateData> processRemoveNode() {
+		context().children().head().tell(PoisonPill.getInstance(), self());
+		return stay();
+	}
+
+	private akka.actor.FSM.State<State, StateData> processAddNode() {
+		ActorRef newNode = context().actorOf(Props.create(NodeActor.class));
+		sender().tell(new AddNodeEndedMessage(newNode), self());
+		return stay();
+	}
+
+	private akka.actor.FSM.State<State, StateData> startRound() {
+		int pendingNodes = 0;
+		taskSender = sender();
+		for (ActorRef c : JavaConversions.asJavaIterable(context().children())) {
+			pendingNodes++;
+			c.tell(new NodeActor.StartRoundMessage(), self());
+		}
+		return goTo(State.RoundRunning).using(new NodesCount(pendingNodes));
+	}
+
+	private akka.actor.FSM.State<State, StateData> processEndRound(NodesCount nodesCount) {
+		nodesCount.nodes--;
+		if (nodesCount.nodes == 0) {
+			taskSender.tell(new EndRoundMessage(), self());
+			return goTo(State.Idle).using(Uninitialized.Uninitialized);
+		}
+		return stay();
+	}
+
+	private akka.actor.FSM.State<State, StateData> startMeasure() {
+		aggregatedMeasure = new MeasureDataMessage();
+		int pendingNodes = 0;
+		for (ActorRef c : JavaConversions.asJavaIterable(context().children())) {
+			pendingNodes++;
+			c.tell(new NodeActor.StartMeasureMessage(), self());
+		}
+		return goTo(State.MeasureRunning).using(new NodesCount(pendingNodes));
+	}
+
+	private akka.actor.FSM.State<State, StateData> processNodeMeasure(MeasureDataMessage measure, NodesCount count) {
+		aggregatedMeasure.aggregate(measure);
+		count.nodes--;
+
+		if (count.nodes == 0) {
 			// Calculate in-degree distribution
-			int unreachedNodes = g.aggregatedMeasure.totalNodes;
+			int unreachedNodes = aggregatedMeasure.totalNodes;
 			Map<Integer, Integer> inDegreeDist = new TreeMap<Integer, Integer>();
-			for (int inDegree : g.aggregatedMeasure.inDegree.values()) {
+			for (int inDegree : aggregatedMeasure.inDegree.values()) {
 				int v = inDegreeDist.getOrDefault(inDegree, 0);
 				inDegreeDist.put(inDegree, v + 1);
 				unreachedNodes--;
@@ -43,39 +108,13 @@ public class GraphActor extends UntypedActor {
 
 			inDegreeDist.put(0, unreachedNodes);
 
-			g.taskSender.tell(new SimulationDataMessage(g.aggregatedMeasure.totalNodes, inDegreeDist), g.getSelf());
+			taskSender.tell(new SimulationDataMessage(aggregatedMeasure.totalNodes, inDegreeDist), self());
+			return goTo(State.Idle).using(Uninitialized.Uninitialized);
 		}
-	};
-
-	static {
-		MATCHER.set(StartRoundMessage.class, PROCESS_CONTROL_TASK);
-		MATCHER.set(AddNodeMessage.class, PROCESS_CONTROL_TASK);
-		MATCHER.set(RemoveNodeMessage.class, PROCESS_CONTROL_TASK);
-		MATCHER.set(StartMeasureMessage.class, PROCESS_CONTROL_TASK);
-
-		MATCHER.set(NodeActor.EndRoundMessage.class, PROCESS_NODE_END_ROUND);
-		MATCHER.set(MeasureDataMessage.class, PROCESS_NODE_MEASURE);
+		return stay();
 	}
 
-	// Task processing state
-	int pendingNodes = 0;
-	private ActorRef taskSender;
-
-	MeasureDataMessage aggregatedMeasure;
-
-	@Override
-	public void onReceive(Object message) throws Exception {
-		MATCHER.process(message, this);
-	}
-
-	public static class AddNodeMessage implements TaskMessage {
-
-		@Override
-		public void execute(UntypedActor a) {
-			GraphActor g = (GraphActor) a;
-			ActorRef newNode = g.getContext().actorOf(Props.create(NodeActor.class));
-			g.getSender().tell(new AddNodeEndedMessage(newNode), g.getSelf());
-		}
+	public static class AddNodeMessage {
 	}
 
 	public static class AddNodeEndedMessage {
@@ -92,26 +131,8 @@ public class GraphActor extends UntypedActor {
 
 	}
 
-	public static class InitNodeMessage {
+	public static class RemoveNodeMessage {
 
-		final int cacheSize;
-		final int shuffleLength;
-		final ActorRef bootNeighbor;
-
-		public InitNodeMessage(int cacheSize, int shuffleLength, ActorRef bootNeighbor) {
-			this.cacheSize = cacheSize;
-			this.shuffleLength = shuffleLength;
-			this.bootNeighbor = bootNeighbor;
-		}
-
-	}
-
-	public static class RemoveNodeMessage implements TaskMessage {
-
-		@Override
-		public void execute(UntypedActor a) {
-			((GraphActor) a).getContext().children().head().tell(PoisonPill.getInstance(), ((GraphActor) a).getSelf());
-		}
 	}
 
 	public static class RemoveNodeEndedMessage {
@@ -124,22 +145,31 @@ public class GraphActor extends UntypedActor {
 
 	}
 
-	public static class StartRoundMessage implements TaskMessage {
+	public static class StartRoundMessage {
 
-		@Override
-		public void execute(UntypedActor a) {
-			if (a instanceof GraphActor) {
-				GraphActor g = (GraphActor) a;
-				for (ActorRef c : g.getContext().getChildren()) {
-					g.pendingNodes++;
-					c.tell(this, g.getSelf());
-				}
-			} else
-				((NodeActor) a).startProtocolRound();
-		}
 	}
 
-	public static class EndRoundMessage implements StatusMessage {
+	public static class EndRoundMessage {
+
+	}
+
+	public static class StartMeasureMessage {
+	}
+
+	public static class SimulationDataMessage {
+
+		private final Map<Integer, Integer> degreeDistr;
+		private final int totalNodes;
+
+		public SimulationDataMessage(int totalNodes, Map<Integer, Integer> degreeDistr) {
+			this.totalNodes = totalNodes;
+			this.degreeDistr = degreeDistr;
+		}
+
+		@Override
+		public String toString() {
+			return "SimulationDataMessage [degreeDistr=" + degreeDistr + ", totalNodes=" + totalNodes + "]";
+		}
 
 	}
 }

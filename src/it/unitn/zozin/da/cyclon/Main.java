@@ -23,8 +23,8 @@ public class Main {
 		Configuration config = new Configuration();
 		config.BOOT_TOPOLOGY = Topology.STAR;
 		config.NODES = 1000;
-		config.ROUNDS = 1000;
-		config.NODE_ADD = 0;
+		config.ROUNDS = 100;
+		config.NODE_ADD = 10;
 		config.NODE_REM = 0; // TODO: add node removal
 		config.CYCLON_CACHE_SIZE = 20;
 		config.CYCLON_SHUFFLE_LENGTH = 8;
