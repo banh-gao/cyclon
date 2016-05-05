@@ -3,11 +3,12 @@ package it.unitn.zozin.da.cyclon;
 import it.unitn.zozin.da.cyclon.ControlActor.Configuration.Topology;
 import it.unitn.zozin.da.cyclon.GraphActor.AddNodeEndedMessage;
 import it.unitn.zozin.da.cyclon.GraphActor.AddNodeMessage;
-import it.unitn.zozin.da.cyclon.GraphActor.EndRoundMessage;
-import it.unitn.zozin.da.cyclon.GraphActor.InitNodeEndedMessage;
-import it.unitn.zozin.da.cyclon.GraphActor.RemoveNodeEndedMessage;
 import it.unitn.zozin.da.cyclon.GraphActor.SimulationDataMessage;
-import it.unitn.zozin.da.cyclon.GraphActor.StartRoundMessage;
+import it.unitn.zozin.da.cyclon.NodeActor.EndJoinMessage;
+import it.unitn.zozin.da.cyclon.NodeActor.EndRoundMessage;
+import it.unitn.zozin.da.cyclon.NodeActor.InitNodeEndedMessage;
+import it.unitn.zozin.da.cyclon.NodeActor.StartJoinMessage;
+import it.unitn.zozin.da.cyclon.NodeActor.StartRoundMessage;
 import java.util.NavigableSet;
 import java.util.TreeSet;
 import akka.actor.AbstractFSM;
@@ -17,10 +18,11 @@ import akka.actor.ActorSelection;
 class ControlActor extends AbstractFSM<ControlActor.State, ControlActor.StateData> {
 
 	enum State {
-		Uninitialized,
-		NodesRemoving,
+		Idle,
 		NodesAdding,
 		NodesInit,
+		BootMeasureRunning,
+		NodesJoining,
 		RoundRunning,
 		MeasureRunning
 	}
@@ -43,20 +45,18 @@ class ControlActor extends AbstractFSM<ControlActor.State, ControlActor.StateDat
 		public Topology BOOT_TOPOLOGY;
 		int NODES;
 		int ROUNDS;
-		int NODE_ADD;
-		int NODE_REM;
 		int CYCLON_CACHE_SIZE;
 		int CYCLON_SHUFFLE_LENGTH;
 	}
 
-	class NodesCount implements StateData {
+	class CompletionCount implements StateData {
 
-		private final int totalNodes;
+		private final int totalPending;
 		private int count;
 
-		public NodesCount(int totalNodes) {
+		public CompletionCount(int totalPending) {
 			super();
-			this.totalNodes = totalNodes;
+			this.totalPending = totalPending;
 		}
 
 		public void increaseOne() {
@@ -64,7 +64,7 @@ class ControlActor extends AbstractFSM<ControlActor.State, ControlActor.StateDat
 		}
 
 		public boolean isCompleted() {
-			return count == totalNodes;
+			return count == totalPending;
 		}
 	}
 
@@ -87,81 +87,47 @@ class ControlActor extends AbstractFSM<ControlActor.State, ControlActor.StateDat
 	}
 
 	{
-		startWith(State.Uninitialized, Uninitialized.Uninitialized);
+		startWith(State.Idle, Uninitialized.Uninitialized);
 
-		when(State.Uninitialized, matchEvent(Configuration.class, (confMsg, data) -> initSimulation(confMsg)));
-
-		when(State.NodesRemoving, matchEvent(RemoveNodeEndedMessage.class, NodesCount.class, (endRemMsg, nodeCount) -> processNodeRemoved(endRemMsg, nodeCount)));
+		when(State.Idle, matchEvent(Configuration.class, (confMsg, data) -> initSimulation(confMsg)));
 
 		when(State.NodesAdding, matchEvent(AddNodeEndedMessage.class, AddedNodes.class, (endAddMsg, addedNodes) -> processNodeAdded(endAddMsg, addedNodes)));
 
-		when(State.NodesInit, matchEvent(InitNodeEndedMessage.class, NodesCount.class, (endInitMsg, nodeCount) -> processNodeInitialized(endInitMsg, nodeCount)));
+		when(State.NodesInit, matchEvent(InitNodeEndedMessage.class, CompletionCount.class, (endInitMsg, nodeCount) -> processNodeInitialized(endInitMsg, nodeCount)));
 
-		when(State.RoundRunning, matchEvent(EndRoundMessage.class, (endRoundMsg, data) -> processRoundEnded(endRoundMsg)));
+		when(State.BootMeasureRunning, matchEvent(SimulationDataMessage.class, (measureMsg, data) -> processBootMeasure(measureMsg)));
 
-		when(State.MeasureRunning, matchEvent(SimulationDataMessage.class, (measureMsg, data) -> processMeasureData(measureMsg)));
+		when(State.NodesJoining, matchEvent(EndJoinMessage.class, (endInitMsg, data) -> executeMeasure()));
+
+		when(State.MeasureRunning, matchEvent(SimulationDataMessage.class, CompletionCount.class, (measureMsg, roundCount) -> processMeasure(measureMsg, roundCount)));
+
+		when(State.RoundRunning, matchEvent(EndRoundMessage.class, CompletionCount.class, (endRoundMsg, roundCount) -> processRoundEnded(endRoundMsg, roundCount)));
+
 	}
 
-	private ActorSelection graph;
+	private ActorSelection GRAPH;
 
-	private Configuration conf;
 	private ActorRef simSender;
-
-	private int currentRound;
+	private Configuration conf;
+	private SimulationDataMessage aggregateMeasure;
 
 	@Override
 	public void preStart() throws Exception {
-		graph = context().actorSelection("../graph");
+		GRAPH = context().actorSelection("../graph");
 	}
 
 	private akka.actor.FSM.State<State, StateData> initSimulation(Configuration conf) {
-		this.conf = conf;
 		simSender = sender();
-		currentRound = 0;
+		this.conf = conf;
+		aggregateMeasure = null;
 
-		return prepareSimulationRound();
-	}
-
-	private akka.actor.FSM.State<State, StateData> prepareSimulationRound() {
-		if (currentRound >= conf.ROUNDS) {
-			executeMeasure();
-			return goTo(State.MeasureRunning);
-		}
-
-		// Init only for first round
-		if (currentRound == 0) {
-			return addNodes(conf.NODES + conf.NODE_ADD);
-		} else {
-			return removeNodes(conf.NODE_REM);
-		}
-	}
-
-	private akka.actor.FSM.State<State, StateData> removeNodes(int nodes) {
-		if (nodes == 0)
-			return addNodes(conf.NODE_ADD);
-
-		for (int i = 0; i < nodes; i++)
-			graph.tell(new GraphActor.RemoveNodeMessage(), self());
-
-		return goTo(State.NodesRemoving).using(new NodesCount(nodes));
-	}
-
-	private akka.actor.FSM.State<State, StateData> processNodeRemoved(RemoveNodeEndedMessage message, NodesCount count) {
-		count.increaseOne();
-
-		if (count.isCompleted())
-			return addNodes(conf.NODE_ADD);
-		else
-			return stay();
+		return addNodes(conf.NODES);
 	}
 
 	private akka.actor.FSM.State<State, StateData> addNodes(int nodes) {
-		if (nodes == 0)
-			return executeProtocolRound();
-
 		for (int i = 0; i < nodes; i++) {
 			AddNodeMessage msg = new GraphActor.AddNodeMessage();
-			graph.tell(msg, self());
+			GRAPH.tell(msg, self());
 		}
 
 		return goTo(State.NodesAdding).using(new AddedNodes(nodes));
@@ -171,73 +137,99 @@ class ControlActor extends AbstractFSM<ControlActor.State, ControlActor.StateDat
 		addedNodes.increaseOne(message.newNode);
 
 		if (addedNodes.isCompleted())
-			return initNodes(addedNodes.addedNodes);
+			return executeNodesInit(addedNodes.addedNodes);
 		else
 			return stay();
 	}
 
-	private akka.actor.FSM.State<State, StateData> initNodes(NavigableSet<ActorRef> addedNodes) {
-		if (addedNodes.size() == 0)
-			return executeProtocolRound();
-
+	private akka.actor.FSM.State<State, StateData> executeNodesInit(NavigableSet<ActorRef> addedNodes) {
 		for (ActorRef n : addedNodes) {
-			ActorRef bootNode = getBootNeighbor(addedNodes, n);
+			ActorRef bootNode = getIntroducerNode(addedNodes, n);
 			n.tell(new NodeActor.InitNodeMessage(conf.CYCLON_CACHE_SIZE, conf.CYCLON_SHUFFLE_LENGTH, bootNode), self());
 		}
 
-		return goTo(State.NodesInit).using(new NodesCount(addedNodes.size()));
+		return goTo(State.NodesInit).using(new CompletionCount(addedNodes.size()));
 	}
 
 	/**
-	 * Determine which node the given node as to use as boot neighbor
-	 * 
-	 * @param n
-	 * @param addedNodes
-	 * 
-	 * @param node
-	 * @return
+	 * Determine which node the given node as to use as introducer node
 	 */
-	private ActorRef getBootNeighbor(NavigableSet<ActorRef> addedNodes, ActorRef node) {
+	private ActorRef getIntroducerNode(NavigableSet<ActorRef> addedNodes, ActorRef node) {
 		// FIXME: newNodes only contains nodes added in the last round
 		if (conf.BOOT_TOPOLOGY == Topology.CHAIN) {
-			ActorRef bootIdx = addedNodes.higher(node);
+			ActorRef introducer = addedNodes.higher(node);
 
-			if (bootIdx == null)
-				bootIdx = addedNodes.first();
+			if (introducer == null)
+				introducer = addedNodes.first();
 
-			return bootIdx;
+			return introducer;
 		} else {
 			// Star topology on first node
 			return addedNodes.first();
 		}
 	}
 
-	private akka.actor.FSM.State<State, StateData> processNodeInitialized(InitNodeEndedMessage message, NodesCount count) {
+	private akka.actor.FSM.State<State, StateData> processNodeInitialized(InitNodeEndedMessage message, CompletionCount count) {
 		count.increaseOne();
+
 		if (count.isCompleted()) {
-			return executeProtocolRound();
+			return executePreMeasure();
 		} else
 			return stay();
 	}
 
-	private akka.actor.FSM.State<State, StateData> executeProtocolRound() {
-		System.out.println("Starting round " + (currentRound + 1) + "... ");
-		graph.tell(new StartRoundMessage(), self());
+	private akka.actor.FSM.State<State, StateData> executePreMeasure() {
+		GRAPH.tell(new GraphActor.StartMeasureMessage(), self());
+		return goTo(State.BootMeasureRunning);
+	}
+
+	private akka.actor.FSM.State<State, StateData> processBootMeasure(SimulationDataMessage measureMsg) {
+		// simSender.tell(measureMsg, self());
+		System.out.println("Bootstrap measure: " + measureMsg);
+		return executeNodesJoin();
+	}
+
+	private akka.actor.FSM.State<State, StateData> executeNodesJoin() {
+		GRAPH.tell(new StartJoinMessage(), self());
+		return goTo(State.NodesJoining).using(new CompletionCount(conf.ROUNDS));
+	}
+
+	private akka.actor.FSM.State<State, StateData> executeMeasure() {
+		GRAPH.tell(new GraphActor.StartMeasureMessage(), self());
+		return goTo(State.MeasureRunning);
+	}
+
+	private akka.actor.FSM.State<State, StateData> processMeasure(SimulationDataMessage measureMsg, CompletionCount roundCount) {
+		aggregateMeasure(measureMsg);
+
+		if (roundCount.count == 0)
+			System.out.println("Join measure: " + measureMsg);
+		else
+			System.out.println("Measure after round " + roundCount.count + ": " + measureMsg);
+
+		if (roundCount.isCompleted()) {
+			// Send report back to simulation starter
+			simSender.tell(aggregateMeasure, self());
+			return goTo(State.Idle).using(Uninitialized.Uninitialized);
+		} else {
+			return executeProtocolRound(roundCount);
+		}
+	}
+
+	private void aggregateMeasure(SimulationDataMessage roundMeasure) {
+		aggregateMeasure = roundMeasure;
+	}
+
+	private akka.actor.FSM.State<State, StateData> executeProtocolRound(CompletionCount roundCount) {
+		System.out.println("Starting round " + (roundCount.count + 1) + "... ");
+		GRAPH.tell(new StartRoundMessage(), self());
 		return goTo(State.RoundRunning);
 	}
 
-	private akka.actor.FSM.State<State, StateData> processRoundEnded(EndRoundMessage roundMsg) {
-		System.out.println("Completed round " + (currentRound + 1));
-		currentRound++;
-		return prepareSimulationRound();
+	private akka.actor.FSM.State<State, StateData> processRoundEnded(EndRoundMessage roundMsg, CompletionCount roundCount) {
+		System.out.println("Completed round " + (roundCount.count + 1));
+		roundCount.increaseOne();
+		return executeMeasure();
 	}
 
-	private void executeMeasure() {
-		graph.tell(new GraphActor.StartMeasureMessage(), self());
-	}
-
-	private akka.actor.FSM.State<State, StateData> processMeasureData(SimulationDataMessage measureMsg) {
-		simSender.tell(measureMsg, self());
-		return goTo(State.Uninitialized).using(Uninitialized.Uninitialized);
-	}
 }

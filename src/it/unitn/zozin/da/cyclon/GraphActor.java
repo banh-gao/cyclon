@@ -1,18 +1,21 @@
 package it.unitn.zozin.da.cyclon;
 
+import it.unitn.zozin.da.cyclon.NodeActor.EndJoinMessage;
+import it.unitn.zozin.da.cyclon.NodeActor.EndRoundMessage;
 import it.unitn.zozin.da.cyclon.NodeActor.MeasureDataMessage;
+import it.unitn.zozin.da.cyclon.NodeActor.StartJoinMessage;
+import it.unitn.zozin.da.cyclon.NodeActor.StartRoundMessage;
 import java.util.Map;
 import java.util.TreeMap;
 import scala.collection.JavaConversions;
 import akka.actor.AbstractFSM;
 import akka.actor.ActorRef;
-import akka.actor.PoisonPill;
 import akka.actor.Props;
 
 public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateData> {
 
 	enum State {
-		Idle, RoundRunning, MeasureRunning
+		Idle, JoinRunning, RoundRunning, MeasureRunning
 	}
 
 	interface StateData {
@@ -25,22 +28,32 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 
 	class NodesCount implements StateData {
 
-		int nodes;
+		private final int totalNodes;
+		private int count;
 
-		public NodesCount(int nodes) {
+		public NodesCount(int totalNodes) {
 			super();
-			this.nodes = nodes;
+			this.totalNodes = totalNodes;
 		}
 
+		public void increaseOne() {
+			count += 1;
+		}
+
+		public boolean isCompleted() {
+			return count == totalNodes;
+		}
 	}
 
 	{
 		startWith(State.Idle, Uninitialized.Uninitialized);
 
-		when(State.Idle, matchEvent(RemoveNodeMessage.class, (removeNodeMsg, data) -> processRemoveNode()));
 		when(State.Idle, matchEvent(AddNodeMessage.class, (addNodeMsg, data) -> processAddNode()));
 
-		when(State.Idle, matchEvent(StartRoundMessage.class, (startRoundMsg, data) -> startRound()));
+		when(State.Idle, matchEvent(StartJoinMessage.class, (startJoinMsg, data) -> startJoin(startJoinMsg)));
+		when(State.JoinRunning, matchEvent(EndJoinMessage.class, NodesCount.class, (endJoinMsg, nodesCount) -> processEndJoin(endJoinMsg, nodesCount)));
+
+		when(State.Idle, matchEvent(StartRoundMessage.class, (startRoundMsg, data) -> startRound(startRoundMsg)));
 		when(State.RoundRunning, matchEvent(NodeActor.EndRoundMessage.class, NodesCount.class, (endRoundMsg, nodesCount) -> processEndRound(nodesCount)));
 
 		when(State.Idle, matchEvent(StartMeasureMessage.class, (startMeasureMsg, data) -> startMeasure()));
@@ -52,30 +65,44 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 
 	MeasureDataMessage aggregatedMeasure;
 
-	private akka.actor.FSM.State<State, StateData> processRemoveNode() {
-		context().children().head().tell(PoisonPill.getInstance(), self());
-		return stay();
-	}
-
 	private akka.actor.FSM.State<State, StateData> processAddNode() {
 		ActorRef newNode = context().actorOf(Props.create(NodeActor.class));
 		sender().tell(new AddNodeEndedMessage(newNode), self());
 		return stay();
 	}
 
-	private akka.actor.FSM.State<State, StateData> startRound() {
+	private akka.actor.FSM.State<State, StateData> startJoin(StartJoinMessage startJoinMsg) {
 		int pendingNodes = 0;
 		taskSender = sender();
 		for (ActorRef c : JavaConversions.asJavaIterable(context().children())) {
 			pendingNodes++;
-			c.tell(new NodeActor.StartRoundMessage(), self());
+			c.tell(startJoinMsg, self());
+		}
+		return goTo(State.JoinRunning).using(new NodesCount(pendingNodes));
+	}
+
+	private akka.actor.FSM.State<State, StateData> processEndJoin(EndJoinMessage endJoinMsg, NodesCount nodesCount) {
+		nodesCount.increaseOne();
+		if (nodesCount.isCompleted()) {
+			taskSender.tell(endJoinMsg, self());
+			return goTo(State.Idle).using(new NodesCount(nodesCount.totalNodes));
+		}
+		return stay();
+	}
+
+	private akka.actor.FSM.State<State, StateData> startRound(StartRoundMessage startRoundMsg) {
+		int pendingNodes = 0;
+		taskSender = sender();
+		for (ActorRef c : JavaConversions.asJavaIterable(context().children())) {
+			pendingNodes++;
+			c.tell(startRoundMsg, self());
 		}
 		return goTo(State.RoundRunning).using(new NodesCount(pendingNodes));
 	}
 
 	private akka.actor.FSM.State<State, StateData> processEndRound(NodesCount nodesCount) {
-		nodesCount.nodes--;
-		if (nodesCount.nodes == 0) {
+		nodesCount.increaseOne();
+		if (nodesCount.isCompleted()) {
 			taskSender.tell(new EndRoundMessage(), self());
 			return goTo(State.Idle).using(Uninitialized.Uninitialized);
 		}
@@ -85,6 +112,7 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 	private akka.actor.FSM.State<State, StateData> startMeasure() {
 		aggregatedMeasure = new MeasureDataMessage();
 		int pendingNodes = 0;
+		taskSender = sender();
 		for (ActorRef c : JavaConversions.asJavaIterable(context().children())) {
 			pendingNodes++;
 			c.tell(new NodeActor.StartMeasureMessage(), self());
@@ -94,9 +122,9 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 
 	private akka.actor.FSM.State<State, StateData> processNodeMeasure(MeasureDataMessage measure, NodesCount count) {
 		aggregatedMeasure.aggregate(measure);
-		count.nodes--;
+		count.increaseOne();
 
-		if (count.nodes == 0) {
+		if (count.isCompleted()) {
 			// Calculate in-degree distribution
 			int unreachedNodes = aggregatedMeasure.totalNodes;
 			Map<Integer, Integer> inDegreeDist = new TreeMap<Integer, Integer>();
@@ -124,32 +152,6 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 		public AddNodeEndedMessage(ActorRef newNode) {
 			this.newNode = newNode;
 		}
-
-	}
-
-	public static class InitNodeEndedMessage {
-
-	}
-
-	public static class RemoveNodeMessage {
-
-	}
-
-	public static class RemoveNodeEndedMessage {
-
-		final ActorRef removedNode;
-
-		public RemoveNodeEndedMessage(ActorRef removedNode) {
-			this.removedNode = removedNode;
-		}
-
-	}
-
-	public static class StartRoundMessage {
-
-	}
-
-	public static class EndRoundMessage {
 
 	}
 

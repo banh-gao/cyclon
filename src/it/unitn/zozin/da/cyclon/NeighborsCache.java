@@ -35,13 +35,23 @@ public class NeighborsCache {
 			n.age += 1;
 	}
 
-	public Neighbor selectOldestNeighbor() {
+	public Neighbor getOldestNeighbor() {
 		Neighbor oldest = cache.get(0);
 		for (int i = 1; i < cache.size(); i++)
 			if (cache.get(i).age > oldest.age)
 				oldest = cache.get(i);
 
 		return oldest;
+	}
+
+	public Neighbor selectOldestNeighbor() {
+		Neighbor oldest = getOldestNeighbor();
+		replaceableEntries.add(cache.indexOf(oldest));
+		return oldest;
+	}
+
+	public Neighbor getRandomNeighbor() {
+		return cache.get(rand.nextInt(cache.size()));
 	}
 
 	public List<Neighbor> selectRandomNeighbors(int shuffleLength) {
@@ -168,7 +178,15 @@ public class NeighborsCache {
 		return cache.size();
 	}
 
+	public int maxSize() {
+		return MAX_SIZE;
+	}
+
 	public List<Neighbor> getNeighbors() {
 		return Collections.unmodifiableList(cache);
+	}
+
+	public Neighbor replaceRandomNeighbor(Neighbor neighbor) {
+		return cache.set(cache.indexOf(getRandomNeighbor()), neighbor);
 	}
 }

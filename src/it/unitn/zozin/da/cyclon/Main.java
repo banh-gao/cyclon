@@ -13,7 +13,7 @@ import akka.util.Timeout;
 
 public class Main {
 
-	static Timeout SIM_MAX_TIME = Timeout.apply(FiniteDuration.create(1, TimeUnit.MINUTES));
+	static Timeout SIM_MAX_TIME = Timeout.apply(FiniteDuration.create(20, TimeUnit.MINUTES));
 
 	public static void main(String args[]) {
 		ActorSystem s = ActorSystem.create();
@@ -21,11 +21,9 @@ public class Main {
 		ActorRef control = s.actorOf(Props.create(ControlActor.class), "control");
 
 		Configuration config = new Configuration();
-		config.BOOT_TOPOLOGY = Topology.STAR;
-		config.NODES = 1000;
-		config.ROUNDS = 100;
-		config.NODE_ADD = 10;
-		config.NODE_REM = 0; // TODO: add node removal
+		config.BOOT_TOPOLOGY = Topology.CHAIN;
+		config.NODES = 100;
+		config.ROUNDS = 0;
 		config.CYCLON_CACHE_SIZE = 20;
 		config.CYCLON_SHUFFLE_LENGTH = 8;
 
