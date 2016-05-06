@@ -50,7 +50,7 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 		// Possible states for the first round //
 
 		// Initialize the node
-		when(State.Uninitialized, matchEvent(InitNodeMessage.class, (initMsg, data) -> processInitNode(initMsg)));
+		when(State.Uninitialized, matchEvent(BootNodeMessage.class, (initMsg, data) -> processInitNode(initMsg)));
 
 		// Start joining the node (executed on first round)
 		when(State.WaitingForJoin, matchEvent(StartJoinMessage.class, (startJoinMsg, data) -> performJoin()));
@@ -91,14 +91,14 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 		this.selfAddress = new Neighbor(0, self());
 	}
 
-	private akka.actor.FSM.State<State, StateData> processInitNode(InitNodeMessage message) {
+	private akka.actor.FSM.State<State, StateData> processInitNode(BootNodeMessage message) {
 		cache = new NeighborsCache(message.cacheSize);
 		shuffleLength = message.shuffleLength;
 
 		// Initialize cache with the boot neighbor
 		cache.updateNeighbors(Collections.singletonList(new Neighbor(0, message.bootNeighbor)), false);
 
-		sender().tell(new InitNodeEndedMessage(), self());
+		sender().tell(new BootNodeEndedMessage(), self());
 		return goTo(State.WaitingForJoin);
 	}
 
@@ -211,20 +211,20 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 		return stay();
 	}
 
-	public static class InitNodeMessage {
+	public static class BootNodeMessage {
 
 		final int cacheSize;
 		final int shuffleLength;
 		final ActorRef bootNeighbor;
 
-		public InitNodeMessage(int cacheSize, int shuffleLength, ActorRef bootNeighbor) {
+		public BootNodeMessage(int cacheSize, int shuffleLength, ActorRef bootNeighbor) {
 			this.cacheSize = cacheSize;
 			this.shuffleLength = shuffleLength;
 			this.bootNeighbor = bootNeighbor;
 		}
 	}
 
-	public static class InitNodeEndedMessage {
+	public static class BootNodeEndedMessage {
 
 	}
 
