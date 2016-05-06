@@ -155,7 +155,6 @@ class ControlActor extends AbstractFSM<ControlActor.State, ControlActor.StateDat
 	 * Determine which node the given node as to use as introducer node
 	 */
 	private ActorRef getIntroducerNode(NavigableSet<ActorRef> addedNodes, ActorRef node) {
-		// FIXME: newNodes only contains nodes added in the last round
 		if (conf.BOOT_TOPOLOGY == Topology.CHAIN) {
 			ActorRef introducer = addedNodes.higher(node);
 
@@ -164,7 +163,7 @@ class ControlActor extends AbstractFSM<ControlActor.State, ControlActor.StateDat
 
 			return introducer;
 		} else {
-			// Star topology on first node
+			// Star topology centered on first node
 			return addedNodes.first();
 		}
 	}

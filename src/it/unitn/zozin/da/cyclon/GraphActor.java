@@ -160,17 +160,17 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 
 	public static class SimulationDataMessage {
 
-		private final Map<Integer, Integer> degreeDistr;
+		private final Map<Integer, Integer> inDegreeDistr;
 		private final int totalNodes;
 
 		public SimulationDataMessage(int totalNodes, Map<Integer, Integer> degreeDistr) {
 			this.totalNodes = totalNodes;
-			this.degreeDistr = degreeDistr;
+			this.inDegreeDistr = degreeDistr;
 		}
 
 		@Override
 		public String toString() {
-			return "SimulationDataMessage [degreeDistr=" + degreeDistr + ", totalNodes=" + totalNodes + "]";
+			return "SimulationDataMessage [inDegreeDistr=" + inDegreeDistr + ", totalNodes=" + totalNodes + "]";
 		}
 
 	}
