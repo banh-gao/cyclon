@@ -5,8 +5,8 @@ import it.unitn.zozin.da.cyclon.NodeActor.EndRoundMessage;
 import it.unitn.zozin.da.cyclon.NodeActor.MeasureDataMessage;
 import it.unitn.zozin.da.cyclon.NodeActor.StartJoinMessage;
 import it.unitn.zozin.da.cyclon.NodeActor.StartRoundMessage;
+import java.util.HashMap;
 import java.util.Map;
-import java.util.TreeMap;
 import scala.collection.JavaConversions;
 import akka.actor.AbstractFSM;
 import akka.actor.ActorRef;
@@ -62,11 +62,12 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 
 	// Task processing state
 	private ActorRef taskSender;
+	private int nodeNum = 0;
 
-	MeasureDataMessage aggregatedMeasure;
+	boolean[][] adjacencyMatrix;
 
 	private akka.actor.FSM.State<State, StateData> processAddNode() {
-		ActorRef newNode = context().actorOf(Props.create(NodeActor.class));
+		ActorRef newNode = context().actorOf(Props.create(NodeActor.class), "" + nodeNum++);
 		sender().tell(new AddNodeEndedMessage(newNode), self());
 		return stay();
 	}
@@ -110,36 +111,59 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 	}
 
 	private akka.actor.FSM.State<State, StateData> startMeasure() {
-		aggregatedMeasure = new MeasureDataMessage();
 		int pendingNodes = 0;
 		taskSender = sender();
 		for (ActorRef c : JavaConversions.asJavaIterable(context().children())) {
 			pendingNodes++;
 			c.tell(new NodeActor.StartMeasureMessage(), self());
 		}
+
+		adjacencyMatrix = new boolean[pendingNodes][pendingNodes];
 		return goTo(State.MeasureRunning).using(new NodesCount(pendingNodes));
 	}
 
 	private akka.actor.FSM.State<State, StateData> processNodeMeasure(MeasureDataMessage measure, NodesCount count) {
-		aggregatedMeasure.aggregate(measure);
 		count.increaseOne();
+		int node = toIndex(sender());
+		for (ActorRef a : measure.neighbors) {
+			int neighbor = toIndex(a);
+			adjacencyMatrix[node][neighbor] = true;
+		}
 
 		if (count.isCompleted()) {
-			// Calculate in-degree distribution
-			int unreachedNodes = aggregatedMeasure.totalNodes;
-			Map<Integer, Integer> inDegreeDist = new TreeMap<Integer, Integer>();
-			for (int inDegree : aggregatedMeasure.inDegree.values()) {
-				int v = inDegreeDist.getOrDefault(inDegree, 0);
-				inDegreeDist.put(inDegree, v + 1);
-				unreachedNodes--;
-			}
+			Map<Integer, Integer> inDegreeDist = calcInDegree(count.totalNodes);
+			int clusteringCoeff = calcClusteringCoeff(count.totalNodes);
 
-			inDegreeDist.put(0, unreachedNodes);
-
-			taskSender.tell(new SimulationDataMessage(aggregatedMeasure.totalNodes, inDegreeDist), self());
+			taskSender.tell(new SimulationDataMessage(count.totalNodes, inDegreeDist, clusteringCoeff), self());
 			return goTo(State.Idle).using(Uninitialized.Uninitialized);
 		}
 		return stay();
+	}
+
+	private int toIndex(ActorRef sender) {
+		return Integer.parseInt(sender.path().name());
+	}
+
+	Map<Integer, Integer> calcInDegree(int totalNodes) {
+		Map<Integer, Integer> inDegreeDistr = new HashMap<Integer, Integer>();
+
+		for (int node = 0; node < totalNodes; node++) {
+			int inDegree = 0;
+			for (int neighbor = 0; neighbor < totalNodes; neighbor++) {
+				if (adjacencyMatrix[neighbor][node])
+					inDegree += 1;
+			}
+			int count = inDegreeDistr.getOrDefault(inDegree, 0);
+			inDegreeDistr.put(inDegree, count + 1);
+		}
+
+		return inDegreeDistr;
+	}
+
+	int calcClusteringCoeff(int totalNodes) {
+		// TODO: calculate clustering coeff
+
+		return 0;
 	}
 
 	public static class AddNodeMessage {
@@ -160,12 +184,14 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 
 	public static class SimulationDataMessage {
 
-		private final Map<Integer, Integer> inDegreeDistr;
-		private final int totalNodes;
+		final Map<Integer, Integer> inDegreeDistr;
+		final int clusteringCoeff;
+		final int totalNodes;
 
-		public SimulationDataMessage(int totalNodes, Map<Integer, Integer> degreeDistr) {
+		public SimulationDataMessage(int totalNodes, Map<Integer, Integer> degreeDistr, int clusteringCoeff) {
 			this.totalNodes = totalNodes;
 			this.inDegreeDistr = degreeDistr;
+			this.clusteringCoeff = clusteringCoeff;
 		}
 
 		@Override

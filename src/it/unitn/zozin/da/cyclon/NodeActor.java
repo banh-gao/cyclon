@@ -3,10 +3,8 @@ package it.unitn.zozin.da.cyclon;
 import it.unitn.zozin.da.cyclon.NeighborsCache.Neighbor;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.Map.Entry;
+import java.util.stream.Collectors;
 import akka.actor.AbstractFSM;
 import akka.actor.ActorRef;
 
@@ -199,12 +197,7 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 	}
 
 	private akka.actor.FSM.State<State, StateData> processMeasureRequest() {
-		MeasureDataMessage m = new MeasureDataMessage();
-
-		m.incrementNodeCounter();
-
-		for (Neighbor neighbor : cache.getNeighbors())
-			m.incrementInDegree(neighbor.address);
+		MeasureDataMessage m = new MeasureDataMessage(cache.getNeighbors().stream().map((n) -> n.address).collect(Collectors.toList()));
 
 		sender().tell(m, self());
 
@@ -294,25 +287,10 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 
 	public static class MeasureDataMessage {
 
-		final Map<ActorRef, Integer> inDegree = new HashMap<ActorRef, Integer>();
+		final List<ActorRef> neighbors;
 
-		int totalNodes = 0;
-
-		public void incrementNodeCounter() {
-			totalNodes++;
-		}
-
-		public void incrementInDegree(ActorRef node) {
-			int v = inDegree.getOrDefault(node, 0);
-			inDegree.put(node, v + 1);
-		}
-
-		public void aggregate(MeasureDataMessage msg) {
-			totalNodes += msg.totalNodes;
-			for (Entry<ActorRef, Integer> e : msg.inDegree.entrySet()) {
-				int v = inDegree.getOrDefault(e.getKey(), 0);
-				inDegree.put(e.getKey(), v + e.getValue());
-			}
+		public MeasureDataMessage(List<ActorRef> neighbors) {
+			this.neighbors = new ArrayList<ActorRef>(neighbors);
 		}
 	}
 }
