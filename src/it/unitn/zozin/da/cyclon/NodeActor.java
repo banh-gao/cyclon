@@ -134,8 +134,13 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 		return stay();
 	}
 
+	static int r = 0;
+
 	private void sendCyclonJoinAnswer() {
+		// FIXME: avoid using sender address in join answer
 		Neighbor replaced = cache.replaceRandomNeighbor(new Neighbor(0, sender()));
+		if (sender() == replaced.address)
+			System.err.println(r++ + "SELF sender:" + sender() + " this: " + selfAddress + " " + cache.getNeighbors());
 		sender().tell(new CyclonNodeAnswer(Collections.singletonList(replaced)), self());
 	}
 

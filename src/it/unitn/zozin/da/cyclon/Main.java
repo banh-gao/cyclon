@@ -29,10 +29,10 @@ public class Main {
 		config.NODES = 1000;
 		config.ROUNDS = 100;
 
-		config.CYCLON_CACHE_SIZE = 20;
+		config.CYCLON_CACHE_SIZE = 10;
 		config.CYCLON_SHUFFLE_LENGTH = 8;
 
-		config.BOOT_TOPOLOGY = Topology.CHAIN;
+		config.BOOT_TOPOLOGY = Topology.STAR;
 		config.PER_ROUND_MEASURE = false;
 
 		CompletionStage<Object> res = PatternsCS.ask(control, config, SIM_MAX_TIME);

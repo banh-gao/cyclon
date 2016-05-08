@@ -5,7 +5,6 @@ import it.unitn.zozin.da.cyclon.NodeActor.EndRoundMessage;
 import it.unitn.zozin.da.cyclon.NodeActor.MeasureDataMessage;
 import it.unitn.zozin.da.cyclon.NodeActor.StartJoinMessage;
 import it.unitn.zozin.da.cyclon.NodeActor.StartRoundMessage;
-import java.util.HashMap;
 import java.util.Map;
 import scala.collection.JavaConversions;
 import akka.actor.AbstractFSM;
@@ -131,10 +130,11 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 		}
 
 		if (count.isCompleted()) {
-			Map<Integer, Integer> inDegreeDist = calcInDegree(count.totalNodes);
-			int clusteringCoeff = calcClusteringCoeff(count.totalNodes);
+			Map<Integer, Integer> inDegreeDist = MetricAlgorithms.calcInDegree(adjacencyMatrix);
+			float clusteringCoeff = MetricAlgorithms.calcClusteringCoeff(adjacencyMatrix);
+			float apl = MetricAlgorithms.calcAveragePathLength(adjacencyMatrix);
 
-			taskSender.tell(new SimulationDataMessage(count.totalNodes, inDegreeDist, clusteringCoeff), self());
+			taskSender.tell(new SimulationDataMessage(count.totalNodes, inDegreeDist, clusteringCoeff, apl), self());
 			return goTo(State.Idle).using(Uninitialized.Uninitialized);
 		}
 		return stay();
@@ -142,28 +142,6 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 
 	private int toIndex(ActorRef sender) {
 		return Integer.parseInt(sender.path().name());
-	}
-
-	Map<Integer, Integer> calcInDegree(int totalNodes) {
-		Map<Integer, Integer> inDegreeDistr = new HashMap<Integer, Integer>();
-
-		for (int node = 0; node < totalNodes; node++) {
-			int inDegree = 0;
-			for (int neighbor = 0; neighbor < totalNodes; neighbor++) {
-				if (adjacencyMatrix[neighbor][node])
-					inDegree += 1;
-			}
-			int count = inDegreeDistr.getOrDefault(inDegree, 0);
-			inDegreeDistr.put(inDegree, count + 1);
-		}
-
-		return inDegreeDistr;
-	}
-
-	int calcClusteringCoeff(int totalNodes) {
-		// TODO: calculate clustering coeff
-
-		return 0;
 	}
 
 	public static class AddNodeMessage {
@@ -185,18 +163,20 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 	public static class SimulationDataMessage {
 
 		final Map<Integer, Integer> inDegreeDistr;
-		final int clusteringCoeff;
+		final float clusteringCoeff;
+		final float apl;
 		final int totalNodes;
 
-		public SimulationDataMessage(int totalNodes, Map<Integer, Integer> degreeDistr, int clusteringCoeff) {
+		public SimulationDataMessage(int totalNodes, Map<Integer, Integer> degreeDistr, float clusteringCoeff, float apl) {
 			this.totalNodes = totalNodes;
 			this.inDegreeDistr = degreeDistr;
 			this.clusteringCoeff = clusteringCoeff;
+			this.apl = apl;
 		}
 
 		@Override
 		public String toString() {
-			return "SimulationDataMessage [inDegreeDistr=" + inDegreeDistr + ", totalNodes=" + totalNodes + "]";
+			return "SimulationDataMessage [inDegreeDistr=" + inDegreeDistr + ", clusteringCoeff=" + clusteringCoeff + ", apl=" + apl + ", totalNodes=" + totalNodes + "]";
 		}
 
 	}
