@@ -1,8 +1,8 @@
 package it.unitn.zozin.da.cyclon;
 
 import it.unitn.zozin.da.cyclon.ControlActor.Configuration;
-import it.unitn.zozin.da.cyclon.ControlActor.Configuration.Topology;
 import it.unitn.zozin.da.cyclon.GraphActor.SimulationDataMessage;
+import java.io.FileInputStream;
 import java.io.PrintStream;
 import java.util.Map.Entry;
 import java.util.concurrent.CompletionStage;
@@ -17,30 +17,28 @@ import akka.util.Timeout;
 
 public class Main {
 
+	String nodes = "nodes";
 	static Timeout SIM_MAX_TIME = Timeout.apply(FiniteDuration.create(5, TimeUnit.MINUTES));
 
-	static Configuration config = new Configuration();
-
 	public static void main(String args[]) throws Exception {
+
+		Configuration config = new Configuration();
+		config.load(new FileInputStream("simulation.cfg"));
+
 		ActorSystem s = ActorSystem.create();
 		s.actorOf(Props.create(GraphActor.class), "graph");
 		ActorRef control = s.actorOf(Props.create(ControlActor.class), "control");
 
-		config.NODES = 1000;
-		config.ROUNDS = 100;
-
-		config.CYCLON_CACHE_SIZE = 10;
-		config.CYCLON_SHUFFLE_LENGTH = 8;
-
-		config.BOOT_TOPOLOGY = Topology.STAR;
-		config.PER_ROUND_MEASURE = false;
-
 		CompletionStage<Object> res = PatternsCS.ask(control, config, SIM_MAX_TIME);
-		res.thenAccept((r) -> saveResults((SimulationDataMessage) r));
+
+		// TODO: save simulation results
+		// res.thenAccept((r) -> saveResults((SimulationDataMessage) r,
+		// config));
+
 		res.thenRun(() -> s.guardian().tell(PoisonPill.getInstance(), null));
 	}
 
-	private static void saveResults(SimulationDataMessage data) {
+	private static void saveResults(SimulationDataMessage data, Configuration config) {
 		System.out.println("FINAL REPORT: " + data);
 
 		try {

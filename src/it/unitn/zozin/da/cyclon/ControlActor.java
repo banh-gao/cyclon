@@ -9,7 +9,10 @@ import it.unitn.zozin.da.cyclon.NodeActor.EndJoinMessage;
 import it.unitn.zozin.da.cyclon.NodeActor.EndRoundMessage;
 import it.unitn.zozin.da.cyclon.NodeActor.StartJoinMessage;
 import it.unitn.zozin.da.cyclon.NodeActor.StartRoundMessage;
+import java.io.FileInputStream;
+import java.io.IOException;
 import java.util.NavigableSet;
+import java.util.Properties;
 import java.util.TreeSet;
 import akka.actor.AbstractFSM;
 import akka.actor.ActorRef;
@@ -47,7 +50,19 @@ class ControlActor extends AbstractFSM<ControlActor.State, ControlActor.StateDat
 		int ROUNDS;
 		int CYCLON_CACHE_SIZE;
 		int CYCLON_SHUFFLE_LENGTH;
+
 		boolean PER_ROUND_MEASURE = false;
+
+		public void load(FileInputStream inStream) throws IOException {
+			Properties props = new Properties();
+			props.load(inStream);
+			NODES = Integer.parseInt(props.getProperty("nodes"));
+			ROUNDS = Integer.parseInt(props.getProperty("rounds"));
+			BOOT_TOPOLOGY = Topology.valueOf(props.getProperty("topology").toUpperCase());
+
+			CYCLON_CACHE_SIZE = Integer.parseInt(props.getProperty("cyclonCache"));
+			CYCLON_SHUFFLE_LENGTH = Integer.parseInt(props.getProperty("cyclonShuffle"));
+		}
 	}
 
 	class CompletionCount implements StateData {
