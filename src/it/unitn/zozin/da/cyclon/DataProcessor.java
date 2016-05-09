@@ -9,83 +9,82 @@ public class DataProcessor {
 
 	private static final int DIST_UNREACHABLE = Integer.MAX_VALUE;
 
-	public SimulationDataMessage processSample(boolean[][] adjMatrix) {
-		return new SimulationDataMessage(adjMatrix.length, calcInDegree(adjMatrix), calcClusteringCoeff(adjMatrix), calcAveragePathLength(adjMatrix));
-	}
-
-	public static Map<Integer, Integer> calcInDegree(boolean[][] adjacencyMatrix) {
+	public SimulationDataMessage processSample(boolean[][] graph) {
 		Map<Integer, Integer> inDegreeDistr = new TreeMap<Integer, Integer>();
 
-		for (int node = 0; node < adjacencyMatrix.length; node++) {
-			int inDegree = 0;
-			for (int neighbor = 0; neighbor < adjacencyMatrix.length; neighbor++) {
-				if (adjacencyMatrix[neighbor][node])
-					inDegree++;
-			}
-			int count = inDegreeDistr.getOrDefault(inDegree, 0);
-			inDegreeDistr.put(inDegree, count + 1);
-		}
+		float aggClustering = 0;
 
-		return inDegreeDistr;
-	}
+		int aggTotalDistance = 0;
 
-	public static float calcClusteringCoeff(boolean[][] adjacencyMatrix) {
-		float global = 0;
+		for (int node = 0; node < graph.length; node++) {
+			// /////// In-degree distribution ////////////
 
-		for (int node = 0; node < adjacencyMatrix.length; node++) {
+			// Count nodes pointing to this node
+			int nodeInDegree = 0;
+			for (int neighbor = 0; neighbor < graph.length; neighbor++)
+				if (graph[neighbor][node])
+					nodeInDegree++;
+			inDegreeDistr.compute(nodeInDegree, (k, v) -> (v == null) ? 0 : v + 1);
+
+			// /////// Clustering coefficient ////////////
+
+			// List of neighbors of the current node
 			List<Integer> neighbors = new ArrayList<Integer>();
-			for (int neighbor = 0; neighbor < adjacencyMatrix.length; neighbor++)
-				if (adjacencyMatrix[node][neighbor])
+			for (int neighbor = 0; neighbor < graph.length; neighbor++)
+				if (graph[node][neighbor])
 					neighbors.add(neighbor);
 
-			// Node with less than two neighbors does not contribute to
+			// FIXME: Node with less than two neighbors does not contribute to
 			// clustering
-			if (neighbors.size() < 2)
-				continue;
+			if (neighbors.size() >= 2) {
+				int edges = 0;
 
-			int edges = 0;
+				for (int neighbor : neighbors)
+					for (int n2 = 0; n2 < graph.length; n2++)
+						if (graph[neighbor][n2] && neighbors.contains(n2))
+							edges++;
 
-			for (int neighbor : neighbors)
-				for (int n2 = 0; n2 < adjacencyMatrix.length; n2++)
-					if (adjacencyMatrix[neighbor][n2] && neighbors.contains(n2))
-						edges++;
-
-			global += edges / (float) (neighbors.size() * (neighbors.size() - 1));
-		}
-
-		return global / adjacencyMatrix.length;
-	}
-
-	public static float calcAveragePathLength(boolean[][] adjacencyMatrix) {
-		int totalDistance = 0;
-		for (int node = 0; node < adjacencyMatrix.length; node++) {
-
-			int[] dist = shortestPath(node, adjacencyMatrix);
-			for (int d : dist) {
-				if (d < DIST_UNREACHABLE) {
-					totalDistance += d;
-				}
+				aggClustering += edges / (float) (neighbors.size() * (neighbors.size() - 1));
 			}
 
+			// /////// Average path length ////////////
+
+			int[] dist = shortestPath(node, graph);
+			for (int d : dist)
+				if (d < DIST_UNREACHABLE)
+					aggTotalDistance += d;
+
 		}
-		return totalDistance / (float) (adjacencyMatrix.length * (adjacencyMatrix.length - 1));
+
+		float clusteringCoeff = aggClustering / graph.length;
+
+		float apl = aggTotalDistance / (float) (graph.length * (graph.length - 1));
+
+		return new SimulationDataMessage(graph.length, inDegreeDistr, clusteringCoeff, apl);
 	}
 
-	private static int[] shortestPath(int src, boolean[][] adjacencyMatrix) {
-		int[] dist = new int[adjacencyMatrix.length];
-		boolean[] visited = new boolean[adjacencyMatrix.length];
+	/**
+	 * Calculate shortest paths length from src with Dijkstra algorithm
+	 * 
+	 * @param src
+	 * @param graph
+	 * @return
+	 */
+	private static int[] shortestPath(int src, boolean[][] graph) {
+		int[] dist = new int[graph.length];
+		boolean[] visited = new boolean[graph.length];
 
-		for (int i = 0; i < adjacencyMatrix.length; i++) {
+		for (int i = 0; i < graph.length; i++) {
 			dist[i] = DIST_UNREACHABLE;
 			visited[i] = false;
 		}
 
 		dist[src] = 0;
 
-		for (int i = 0; i < adjacencyMatrix.length; i++) {
+		for (int i = 0; i < graph.length; i++) {
 			int minVertex = 0;
 			int min = DIST_UNREACHABLE;
-			for (int j = 0; j < adjacencyMatrix.length; j++) {
+			for (int j = 0; j < graph.length; j++) {
 				if (!visited[j] && dist[j] < min) {
 					minVertex = j;
 					min = dist[j];
@@ -94,9 +93,9 @@ public class DataProcessor {
 
 			visited[minVertex] = true;
 
-			for (int v = 0; v < adjacencyMatrix.length; v++)
-				if (!visited[v] && adjacencyMatrix[minVertex][v] && dist[minVertex] != DIST_UNREACHABLE && dist[minVertex] + (adjacencyMatrix[minVertex][v] ? 1 : 0) < dist[v])
-					dist[v] = dist[minVertex] + (adjacencyMatrix[minVertex][v] ? 1 : 0);
+			for (int v = 0; v < graph.length; v++)
+				if (!visited[v] && graph[minVertex][v] && dist[minVertex] != DIST_UNREACHABLE && dist[minVertex] + (graph[minVertex][v] ? 1 : 0) < dist[v])
+					dist[v] = dist[minVertex] + (graph[minVertex][v] ? 1 : 0);
 		}
 		return dist;
 	}
