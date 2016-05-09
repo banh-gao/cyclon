@@ -5,9 +5,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 
-public class MetricAlgorithms {
+public class DataProcessor {
 
 	private static final int DIST_UNREACHABLE = Integer.MAX_VALUE;
+
+	public SimulationDataMessage processSample(boolean[][] adjMatrix) {
+		return new SimulationDataMessage(adjMatrix.length, calcInDegree(adjMatrix), calcClusteringCoeff(adjMatrix), calcAveragePathLength(adjMatrix));
+	}
 
 	public static Map<Integer, Integer> calcInDegree(boolean[][] adjacencyMatrix) {
 		Map<Integer, Integer> inDegreeDistr = new TreeMap<Integer, Integer>();
@@ -30,11 +34,9 @@ public class MetricAlgorithms {
 
 		for (int node = 0; node < adjacencyMatrix.length; node++) {
 			List<Integer> neighbors = new ArrayList<Integer>();
-			for (int neighbor = 0; neighbor < adjacencyMatrix.length; neighbor++) {
-				if (adjacencyMatrix[node][neighbor]) {
+			for (int neighbor = 0; neighbor < adjacencyMatrix.length; neighbor++)
+				if (adjacencyMatrix[node][neighbor])
 					neighbors.add(neighbor);
-				}
-			}
 
 			// Node with less than two neighbors does not contribute to
 			// clustering
@@ -43,14 +45,10 @@ public class MetricAlgorithms {
 
 			int edges = 0;
 
-			for (int neighbor : neighbors) {
-				for (int n2 = 0; n2 < adjacencyMatrix.length; n2++) {
-					if (adjacencyMatrix[neighbor][n2]) {
-						if (neighbors.contains(n2))
-							edges++;
-					}
-				}
-			}
+			for (int neighbor : neighbors)
+				for (int n2 = 0; n2 < adjacencyMatrix.length; n2++)
+					if (adjacencyMatrix[neighbor][n2] && neighbors.contains(n2))
+						edges++;
 
 			global += edges / (float) (neighbors.size() * (neighbors.size() - 1));
 		}
@@ -74,53 +72,53 @@ public class MetricAlgorithms {
 	}
 
 	private static int[] shortestPath(int src, boolean[][] adjacencyMatrix) {
-		// The output array dist[i] will hold
-		// the shortest distance from src to i
 		int[] dist = new int[adjacencyMatrix.length];
-
-		// visited[i] will be true if vertex i is included in shortest
-		// path tree or shortest distance from src to i is finalized
 		boolean[] visited = new boolean[adjacencyMatrix.length];
 
-		// Initialize all distances as INFINITE and visited[] as false
 		for (int i = 0; i < adjacencyMatrix.length; i++) {
 			dist[i] = DIST_UNREACHABLE;
 			visited[i] = false;
 		}
 
-		// Distance of source vertex from itself is always 0
 		dist[src] = 0;
 
-		// Find shortest path for all vertices
 		for (int i = 0; i < adjacencyMatrix.length; i++) {
-
-			// Pick the minimum distance vertex from the set of vertices
-			// not yet processed. minVertex is always equal to src in first
-			// iteration.
 			int minVertex = 0;
 			int min = DIST_UNREACHABLE;
 			for (int j = 0; j < adjacencyMatrix.length; j++) {
-				// Update dist[v] only if is not in sptSet, there is an
-				// edge from u to v, and total weight of path from src to
-				// v through u is smaller than current value of dist[v]
 				if (!visited[j] && dist[j] < min) {
 					minVertex = j;
 					min = dist[j];
 				}
 			}
 
-			// Mark the picked vertex as processed
 			visited[minVertex] = true;
 
-			// Update dist value of the adjacent vertices of the
-			// picked vertex.
 			for (int v = 0; v < adjacencyMatrix.length; v++)
-				// Update dist[v] only if is not in sptSet, there is an
-				// edge from u to v, and total weight of path from src to
-				// v through u is smaller than current value of dist[v]
 				if (!visited[v] && adjacencyMatrix[minVertex][v] && dist[minVertex] != DIST_UNREACHABLE && dist[minVertex] + (adjacencyMatrix[minVertex][v] ? 1 : 0) < dist[v])
 					dist[v] = dist[minVertex] + (adjacencyMatrix[minVertex][v] ? 1 : 0);
 		}
 		return dist;
+	}
+
+	public static class SimulationDataMessage {
+
+		final Map<Integer, Integer> inDegreeDistr;
+		final float clusteringCoeff;
+		final float apl;
+		final int totalNodes;
+
+		public SimulationDataMessage(int totalNodes, Map<Integer, Integer> degreeDistr, float clusteringCoeff, float apl) {
+			this.totalNodes = totalNodes;
+			this.inDegreeDistr = degreeDistr;
+			this.clusteringCoeff = clusteringCoeff;
+			this.apl = apl;
+		}
+
+		@Override
+		public String toString() {
+			return "SimulationDataMessage [inDegreeDistr=" + inDegreeDistr + ", clusteringCoeff=" + clusteringCoeff + ", apl=" + apl + ", totalNodes=" + totalNodes + "]";
+		}
+
 	}
 }

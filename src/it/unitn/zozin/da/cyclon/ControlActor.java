@@ -1,9 +1,9 @@
 package it.unitn.zozin.da.cyclon;
 
 import it.unitn.zozin.da.cyclon.ControlActor.Configuration.Topology;
+import it.unitn.zozin.da.cyclon.DataProcessor.SimulationDataMessage;
 import it.unitn.zozin.da.cyclon.GraphActor.AddNodeEndedMessage;
 import it.unitn.zozin.da.cyclon.GraphActor.AddNodeMessage;
-import it.unitn.zozin.da.cyclon.GraphActor.SimulationDataMessage;
 import it.unitn.zozin.da.cyclon.NodeActor.BootNodeEndedMessage;
 import it.unitn.zozin.da.cyclon.NodeActor.EndJoinMessage;
 import it.unitn.zozin.da.cyclon.NodeActor.EndRoundMessage;
@@ -24,7 +24,6 @@ class ControlActor extends AbstractFSM<ControlActor.State, ControlActor.StateDat
 		Idle,
 		NodesAdding,
 		NodesBoot,
-		BootMeasureRunning,
 		NodesJoining,
 		RoundRunning,
 		MeasureRunning
@@ -67,12 +66,12 @@ class ControlActor extends AbstractFSM<ControlActor.State, ControlActor.StateDat
 
 	class CompletionCount implements StateData {
 
-		private final int totalPending;
+		private final int total;
 		private int count;
 
 		public CompletionCount(int totalPending) {
 			super();
-			this.totalPending = totalPending;
+			this.total = totalPending;
 		}
 
 		public void increaseOne() {
@@ -80,7 +79,7 @@ class ControlActor extends AbstractFSM<ControlActor.State, ControlActor.StateDat
 		}
 
 		public boolean isCompleted() {
-			return count == totalPending;
+			return count == total;
 		}
 	}
 
@@ -110,8 +109,6 @@ class ControlActor extends AbstractFSM<ControlActor.State, ControlActor.StateDat
 		when(State.NodesAdding, matchEvent(AddNodeEndedMessage.class, AddedNodes.class, (endAddMsg, addedNodes) -> processNodeAdded(endAddMsg, addedNodes)));
 
 		when(State.NodesBoot, matchEvent(BootNodeEndedMessage.class, CompletionCount.class, (endInitMsg, nodeCount) -> processNodeBooted(endInitMsg, nodeCount)));
-
-		when(State.BootMeasureRunning, matchEvent(SimulationDataMessage.class, (measureMsg, data) -> processBootMeasure(measureMsg)));
 
 		when(State.NodesJoining, matchEvent(EndJoinMessage.class, CompletionCount.class, (endInitMsg, roundCount) -> processJoinEnded()));
 
@@ -188,20 +185,9 @@ class ControlActor extends AbstractFSM<ControlActor.State, ControlActor.StateDat
 
 		if (count.isCompleted()) {
 			System.out.println("[completed]");
-			return executePreMeasure();
+			return executeNodesJoin();
 		} else
 			return stay();
-	}
-
-	private akka.actor.FSM.State<State, StateData> executePreMeasure() {
-		System.out.print("Measuring [BOOT]... ");
-		GRAPH.tell(new GraphActor.StartMeasureMessage(), self());
-		return goTo(State.BootMeasureRunning);
-	}
-
-	private akka.actor.FSM.State<State, StateData> processBootMeasure(SimulationDataMessage measureMsg) {
-		System.out.println("[completed] -> " + measureMsg);
-		return executeNodesJoin();
 	}
 
 	private akka.actor.FSM.State<State, StateData> executeNodesJoin() {

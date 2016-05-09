@@ -1,7 +1,7 @@
 package it.unitn.zozin.da.cyclon;
 
 import it.unitn.zozin.da.cyclon.ControlActor.Configuration;
-import it.unitn.zozin.da.cyclon.GraphActor.SimulationDataMessage;
+import it.unitn.zozin.da.cyclon.DataProcessor.SimulationDataMessage;
 import java.io.FileInputStream;
 import java.io.PrintStream;
 import java.util.Map.Entry;
@@ -17,13 +17,14 @@ import akka.util.Timeout;
 
 public class Main {
 
-	String nodes = "nodes";
 	static Timeout SIM_MAX_TIME = Timeout.apply(FiniteDuration.create(5, TimeUnit.MINUTES));
 
 	public static void main(String args[]) throws Exception {
 
 		Configuration config = new Configuration();
 		config.load(new FileInputStream("simulation.cfg"));
+
+		config.ROUNDS = 0;
 
 		ActorSystem s = ActorSystem.create();
 		s.actorOf(Props.create(GraphActor.class), "graph");
