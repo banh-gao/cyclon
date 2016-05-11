@@ -24,10 +24,10 @@ public class DataProcessor {
 			for (int neighbor = 0; neighbor < graph.length; neighbor++)
 				if (graph[neighbor][node])
 					nodeInDegree++;
-			inDegreeDistr.compute(nodeInDegree, (k, v) -> (v == null) ? 0 : v + 1);
+			inDegreeDistr.compute(nodeInDegree, (k, v) -> (v == null) ? 1 : v + 1);
 
 			// /////// Clustering coefficient ////////////
-
+			// FIXME: in some cases it is bigger than 1
 			// List of neighbors of the current node
 			List<Integer> neighbors = new ArrayList<Integer>();
 			for (int neighbor = 0; neighbor < graph.length; neighbor++)
@@ -47,7 +47,7 @@ public class DataProcessor {
 				aggClustering += edges / (float) (neighbors.size() * (neighbors.size() - 1));
 			}
 
-			// /////// Average path length ////////////
+			// /////// Average path length (using Dijkstra) ////////////
 
 			int[] dist = shortestPath(node, graph);
 			for (int d : dist)
@@ -63,13 +63,6 @@ public class DataProcessor {
 		return new SimulationDataMessage(graph.length, inDegreeDistr, clusteringCoeff, apl);
 	}
 
-	/**
-	 * Calculate shortest paths length from src with Dijkstra algorithm
-	 * 
-	 * @param src
-	 * @param graph
-	 * @return
-	 */
 	private static int[] shortestPath(int src, boolean[][] graph) {
 		int[] dist = new int[graph.length];
 		boolean[] visited = new boolean[graph.length];

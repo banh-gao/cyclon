@@ -27,7 +27,7 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 	class JoinAnswerCount implements StateData {
 
 		private final int total;
-		private int count;
+		private int count = 0;
 
 		public JoinAnswerCount(int total) {
 			this.total = total;
@@ -45,18 +45,7 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 	{
 		startWith(State.Uninitialized, Uninitialized.Uninitialized);
 
-		// Possible states for the first round //
-
-		// Initialize the node
-		when(State.Uninitialized, matchEvent(BootNodeMessage.class, (initMsg, data) -> processInitNode(initMsg)));
-
-		// Start joining the node (executed on first round)
-		when(State.WaitingForJoin, matchEvent(StartJoinMessage.class, (startJoinMsg, data) -> performJoin()));
-
-		// Receive answers for the ongoing join process
-		when(State.WaitingForJoin, matchEvent(CyclonNodeAnswer.class, JoinAnswerCount.class, (joinMsg, joinAnsCount) -> processJoinAnswer(joinMsg, joinAnsCount)));
-
-		// Possible states for every round //
+		// Possible (state,event) combinations after initialization //
 
 		// Start executing round (move to WaitingForReply state)
 		when(State.Idle, matchEvent(StartRoundMessage.class, (startRoundMsg, data) -> sendCyclonRequest()));
@@ -77,6 +66,18 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 		when(State.Idle, matchEvent(CyclonNodeRequest.class, (nodeListMsg, data) -> processCyclonRequest(nodeListMsg)));
 		when(State.WaitingForJoin, matchEvent(CyclonNodeRequest.class, (reqMsg, data) -> processCyclonRequest(reqMsg)));
 		when(State.WaitingForReply, matchEvent(CyclonNodeRequest.class, (reqMsg, data) -> processCyclonRequest(reqMsg)));
+
+		// Possible (state,event) combinations only after join //
+
+		// Initialize the node
+		when(State.Uninitialized, matchEvent(BootNodeMessage.class, (initMsg, data) -> processInitNode(initMsg)));
+
+		// Start joining the node (executed on first round)
+		when(State.WaitingForJoin, matchEvent(StartJoinMessage.class, (startJoinMsg, data) -> performJoin()));
+
+		// Receive answers for the ongoing join process
+		when(State.WaitingForJoin, matchEvent(CyclonNodeAnswer.class, JoinAnswerCount.class, (joinMsg, joinAnsCount) -> processJoinAnswer(joinMsg, joinAnsCount)));
+
 	}
 
 	private Neighbor selfAddress;
@@ -103,10 +104,9 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 	private akka.actor.FSM.State<State, StateData> performJoin() {
 		ActorRef introducer = cache.getOldestNeighbor().address;
 
-		for (int i = 0; i < cache.freeSlots(); i++)
-			introducer.tell(new CyclonJoin(JOIN_TTL), self());
+		introducer.tell(new CyclonJoin(JOIN_TTL + 1), self());
 
-		return goTo(State.WaitingForJoin).using(new JoinAnswerCount(cache.freeSlots()));
+		return goTo(State.WaitingForJoin).using(new JoinAnswerCount(cache.maxSize()));
 	}
 
 	private akka.actor.FSM.State<State, StateData> processJoinAnswer(CyclonNodeList answer, JoinAnswerCount joinAnsCount) {
@@ -124,28 +124,33 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 	}
 
 	private akka.actor.FSM.State<State, StateData> processJoinReq(CyclonJoin joinReq) {
-		joinReq.reduce();
-		// If random walk ends here
-		if (joinReq.isEnded()) {
-			sendCyclonJoinAnswer();
-		} else
-			forwardJoin(joinReq);
+		joinReq = joinReq.getReduced();
+
+		// This is the introducer of the sender node
+		if (joinReq.TTL == JOIN_TTL) {
+			for (int i = 0; i < cache.maxSize(); i++) {
+				forwardJoin(joinReq);
+			}
+		} else {
+			if (joinReq.isEnded()) {
+				// If random walk ends here
+				sendCyclonJoinAnswer();
+			} else {
+				forwardJoin(joinReq);
+			}
+		}
 
 		return stay();
 	}
 
-	static int r = 0;
-
-	private void sendCyclonJoinAnswer() {
-		// FIXME: avoid using sender address in join answer
-		Neighbor replaced = cache.replaceRandomNeighbor(new Neighbor(0, sender()));
-		if (sender() == replaced.address)
-			System.err.println(r++ + "SELF sender:" + sender() + " this: " + selfAddress + " " + cache.getNeighbors());
-		sender().tell(new CyclonNodeAnswer(Collections.singletonList(replaced)), self());
-	}
-
 	private void forwardJoin(CyclonJoin joinReq) {
 		cache.getRandomNeighbor().address.forward(joinReq, context());
+	}
+
+	private void sendCyclonJoinAnswer() {
+		Neighbor replaced = cache.replaceRandomNeighbor(new Neighbor(0, sender()));
+
+		sender().tell(new CyclonNodeAnswer(Collections.singletonList(replaced)), self());
 	}
 
 	private akka.actor.FSM.State<State, StateData> sendCyclonRequest() {
@@ -247,6 +252,8 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 		final List<Neighbor> nodes;
 
 		public CyclonNodeList(List<Neighbor> nodes) {
+			// FIXME: Clone elements to avoid object reference passing in local
+			// executions
 			this.nodes = new ArrayList<NeighborsCache.Neighbor>();
 			for (Neighbor n : nodes)
 				this.nodes.add(n.clone());
@@ -271,14 +278,14 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 
 	public static class CyclonJoin {
 
-		int TTL;
+		final int TTL;
 
 		public CyclonJoin(int TTL) {
 			this.TTL = TTL;
 		}
 
-		public void reduce() {
-			TTL -= 1;
+		public CyclonJoin getReduced() {
+			return new CyclonJoin(TTL - 1);
 		}
 
 		public boolean isEnded() {

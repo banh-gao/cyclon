@@ -24,8 +24,6 @@ public class Main {
 		Configuration config = new Configuration();
 		config.load(new FileInputStream("simulation.cfg"));
 
-		config.ROUNDS = 0;
-
 		ActorSystem s = ActorSystem.create();
 		s.actorOf(Props.create(GraphActor.class), "graph");
 		ActorRef control = s.actorOf(Props.create(ControlActor.class), "control");
