@@ -23,6 +23,7 @@ class ControlActor extends AbstractFSM<ControlActor.State, ControlActor.StateDat
 	enum State {
 		Idle,
 		NodesAdding,
+		PreMeasureRunning,
 		NodesBoot,
 		NodesJoining,
 		RoundRunning,
@@ -58,6 +59,8 @@ class ControlActor extends AbstractFSM<ControlActor.State, ControlActor.StateDat
 		when(State.Idle, matchEvent(Configuration.class, (confMsg, data) -> initSimulation(confMsg)));
 
 		when(State.NodesAdding, matchEvent(AddNodeEndedMessage.class, AddedNodes.class, (endAddMsg, addedNodes) -> processNodeAdded(endAddMsg, addedNodes)));
+
+		when(State.PreMeasureRunning, matchEvent(SimulationDataMessage.class, (measureMsg, data) -> processPreMeasure(measureMsg)));
 
 		when(State.NodesBoot, matchEvent(BootNodeEndedMessage.class, CompletionCount.class, (endInitMsg, nodeCount) -> processNodeBooted(endInitMsg, nodeCount)));
 
@@ -136,9 +139,21 @@ class ControlActor extends AbstractFSM<ControlActor.State, ControlActor.StateDat
 
 		if (count.isCompleted()) {
 			System.out.println("[completed]");
-			return executeNodesJoin();
+			return executePreMeasure();
 		} else
 			return stay();
+	}
+
+	private akka.actor.FSM.State<State, StateData> executePreMeasure() {
+		System.out.print("Measuring [BOOT]... ");
+
+		GRAPH.tell(new GraphActor.StartMeasureMessage(), self());
+		return goTo(State.PreMeasureRunning);
+	}
+
+	private akka.actor.FSM.State<State, StateData> processPreMeasure(SimulationDataMessage preMeasureMsg) {
+		System.out.println("[completed] -> " + preMeasureMsg);
+		return executeNodesJoin();
 	}
 
 	private akka.actor.FSM.State<State, StateData> executeNodesJoin() {

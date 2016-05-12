@@ -11,10 +11,9 @@ public class DataProcessor {
 
 	public SimulationDataMessage processSample(boolean[][] graph) {
 		Map<Integer, Integer> inDegreeDistr = new TreeMap<Integer, Integer>();
-
 		float aggClustering = 0;
-
 		int aggTotalDistance = 0;
+		int diameter = 0;
 
 		for (int node = 0; node < graph.length; node++) {
 			// /////// In-degree distribution ////////////
@@ -33,16 +32,22 @@ public class DataProcessor {
 			// /////// Average path length (using Dijkstra) ////////////
 
 			int[] dist = shortestPath(node, graph);
-			for (int d : dist)
-				if (d < DIST_UNREACHABLE)
-					aggTotalDistance += d;
+			for (int n2 = 0; n2 < dist.length; n2++) {
+				// Ignore unreachable nodes
+				if (dist[n2] == DIST_UNREACHABLE)
+					continue;
+
+				aggTotalDistance += dist[n2];
+
+				// Maximum path length is the graph diameter
+				if (dist[n2] > diameter)
+					diameter = dist[n2];
+			}
 		}
 
 		float clusteringCoeff = aggClustering / graph.length;
-
 		float apl = aggTotalDistance / (float) (graph.length * (graph.length - 1));
-
-		return new SimulationDataMessage(graph.length, inDegreeDistr, clusteringCoeff, apl);
+		return new SimulationDataMessage(graph.length, inDegreeDistr, clusteringCoeff, apl, diameter);
 	}
 
 	private float calcLocalClustering(int node, boolean[][] graph) {
@@ -73,7 +78,8 @@ public class DataProcessor {
 			}
 		}
 
-		return edges / (float) neighbors.size() * (neighbors.size() - 1);
+		float local = edges / (float) (neighbors.size() * (neighbors.size() - 1));
+		return local;
 	}
 
 	private static int[] shortestPath(int src, boolean[][] graph) {
@@ -99,11 +105,20 @@ public class DataProcessor {
 
 			visited[minVertex] = true;
 
-			for (int v = 0; v < graph.length; v++)
-				if (!visited[v] && graph[minVertex][v] && dist[minVertex] != DIST_UNREACHABLE && dist[minVertex] + (graph[minVertex][v] ? 1 : 0) < dist[v])
-					dist[v] = dist[minVertex] + (graph[minVertex][v] ? 1 : 0);
+			for (int v = 0; v < graph.length; v++) {
+				int edgeWeight = undirectedEdgeWeight(minVertex, v, graph);
+				if (!visited[v] && edgeWeight != DIST_UNREACHABLE && dist[minVertex] != DIST_UNREACHABLE && dist[minVertex] + edgeWeight < dist[v])
+					dist[v] = dist[minVertex] + edgeWeight;
+			}
 		}
 		return dist;
+	}
+
+	private static int undirectedEdgeWeight(int nodeA, int nodeB, boolean[][] graph) {
+		if (graph[nodeA][nodeB] || graph[nodeB][nodeA])
+			return 1;
+		else
+			return DIST_UNREACHABLE;
 	}
 
 	public static class SimulationDataMessage {
@@ -111,18 +126,20 @@ public class DataProcessor {
 		final Map<Integer, Integer> inDegreeDistr;
 		final float clusteringCoeff;
 		final float apl;
+		final int diameter;
 		final int totalNodes;
 
-		public SimulationDataMessage(int totalNodes, Map<Integer, Integer> degreeDistr, float clusteringCoeff, float apl) {
+		public SimulationDataMessage(int totalNodes, Map<Integer, Integer> degreeDistr, float clusteringCoeff, float apl, int diameter) {
 			this.totalNodes = totalNodes;
 			this.inDegreeDistr = degreeDistr;
 			this.clusteringCoeff = clusteringCoeff;
 			this.apl = apl;
+			this.diameter = diameter;
 		}
 
 		@Override
 		public String toString() {
-			return "SimulationDataMessage [inDegreeDistr=" + inDegreeDistr + ", clusteringCoeff=" + clusteringCoeff + ", apl=" + apl + ", totalNodes=" + totalNodes + "]";
+			return "SimulationDataMessage [inDegreeDistr=" + inDegreeDistr + ", clusteringCoeff=" + clusteringCoeff + ", apl=" + apl + ", diameter=" + diameter + ", totalNodes=" + totalNodes + "]";
 		}
 
 	}
