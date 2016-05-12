@@ -33,37 +33,6 @@ class ControlActor extends AbstractFSM<ControlActor.State, ControlActor.StateDat
 
 	}
 
-	private enum Uninitialized implements StateData {
-		Uninitialized
-	}
-
-	// Simulation param message
-	public static class Configuration implements StateData {
-
-		enum Topology {
-			CHAIN, STAR
-		};
-
-		public Topology BOOT_TOPOLOGY;
-		int NODES;
-		int ROUNDS;
-		int CYCLON_CACHE_SIZE;
-		int CYCLON_SHUFFLE_LENGTH;
-
-		boolean PER_ROUND_MEASURE = false;
-
-		public void load(FileInputStream inStream) throws IOException {
-			Properties props = new Properties();
-			props.load(inStream);
-			NODES = Integer.parseInt(props.getProperty("nodes"));
-			ROUNDS = Integer.parseInt(props.getProperty("rounds"));
-			BOOT_TOPOLOGY = Topology.valueOf(props.getProperty("topology").toUpperCase());
-
-			CYCLON_CACHE_SIZE = Integer.parseInt(props.getProperty("cyclonCache"));
-			CYCLON_SHUFFLE_LENGTH = Integer.parseInt(props.getProperty("cyclonShuffle"));
-		}
-	}
-
 	class CompletionCount implements StateData {
 
 		private final int total;
@@ -83,26 +52,8 @@ class ControlActor extends AbstractFSM<ControlActor.State, ControlActor.StateDat
 		}
 	}
 
-	class AddedNodes implements StateData {
-
-		private final int totalNodes;
-		private final NavigableSet<ActorRef> addedNodes = new TreeSet<ActorRef>();
-
-		public AddedNodes(int totalNodes) {
-			this.totalNodes = totalNodes;
-		}
-
-		public void increaseOne(ActorRef addedNode) {
-			addedNodes.add(addedNode);
-		}
-
-		public boolean isCompleted() {
-			return addedNodes.size() == totalNodes;
-		}
-	}
-
 	{
-		startWith(State.Idle, Uninitialized.Uninitialized);
+		startWith(State.Idle, null);
 
 		when(State.Idle, matchEvent(Configuration.class, (confMsg, data) -> initSimulation(confMsg)));
 
@@ -217,7 +168,7 @@ class ControlActor extends AbstractFSM<ControlActor.State, ControlActor.StateDat
 		if (roundCount.isCompleted()) {
 			// Send report back to simulation starter
 			simSender.tell(measureMsg, self());
-			return goTo(State.Idle).using(Uninitialized.Uninitialized);
+			return goTo(State.Idle);
 		} else {
 			return executeProtocolRound(roundCount);
 		}
@@ -237,5 +188,50 @@ class ControlActor extends AbstractFSM<ControlActor.State, ControlActor.StateDat
 			return executeMeasure(roundCount.count);
 		else
 			return executeProtocolRound(roundCount);
+	}
+
+	// Simulation param message
+	public static class Configuration implements StateData {
+
+		enum Topology {
+			CHAIN, STAR
+		};
+
+		public Topology BOOT_TOPOLOGY;
+		int NODES;
+		int ROUNDS;
+		int CYCLON_CACHE_SIZE;
+		int CYCLON_SHUFFLE_LENGTH;
+
+		boolean PER_ROUND_MEASURE = false;
+
+		public void load(FileInputStream inStream) throws IOException {
+			Properties props = new Properties();
+			props.load(inStream);
+			NODES = Integer.parseInt(props.getProperty("nodes"));
+			ROUNDS = Integer.parseInt(props.getProperty("rounds"));
+			BOOT_TOPOLOGY = Topology.valueOf(props.getProperty("topology").toUpperCase());
+
+			CYCLON_CACHE_SIZE = Integer.parseInt(props.getProperty("cyclonCache"));
+			CYCLON_SHUFFLE_LENGTH = Integer.parseInt(props.getProperty("cyclonShuffle"));
+		}
+	}
+
+	class AddedNodes implements StateData {
+
+		private final int totalNodes;
+		private final NavigableSet<ActorRef> addedNodes = new TreeSet<ActorRef>();
+
+		public AddedNodes(int totalNodes) {
+			this.totalNodes = totalNodes;
+		}
+
+		public void increaseOne(ActorRef addedNode) {
+			addedNodes.add(addedNode);
+		}
+
+		public boolean isCompleted() {
+			return addedNodes.size() == totalNodes;
+		}
 	}
 }

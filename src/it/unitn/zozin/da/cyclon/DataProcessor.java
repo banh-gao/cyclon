@@ -19,33 +19,16 @@ public class DataProcessor {
 		for (int node = 0; node < graph.length; node++) {
 			// /////// In-degree distribution ////////////
 
-			// Count nodes pointing to this node
 			int nodeInDegree = 0;
+			// Count nodes pointing to this node
 			for (int neighbor = 0; neighbor < graph.length; neighbor++)
 				if (graph[neighbor][node])
 					nodeInDegree++;
 			inDegreeDistr.compute(nodeInDegree, (k, v) -> (v == null) ? 1 : v + 1);
 
-			// /////// Clustering coefficient ////////////
-			// FIXME: in some cases it is bigger than 1
-			// List of neighbors of the current node
-			List<Integer> neighbors = new ArrayList<Integer>();
-			for (int neighbor = 0; neighbor < graph.length; neighbor++)
-				if (graph[node][neighbor])
-					neighbors.add(neighbor);
+			// /////// Global Clustering coefficient ////////////
 
-			// FIXME: Node with less than two neighbors does not contribute to
-			// clustering
-			if (neighbors.size() >= 2) {
-				int edges = 0;
-
-				for (int neighbor : neighbors)
-					for (int n2 = 0; n2 < graph.length; n2++)
-						if (graph[neighbor][n2] && neighbors.contains(n2))
-							edges++;
-
-				aggClustering += edges / (float) (neighbors.size() * (neighbors.size() - 1));
-			}
+			aggClustering += calcLocalClustering(node, graph);
 
 			// /////// Average path length (using Dijkstra) ////////////
 
@@ -53,7 +36,6 @@ public class DataProcessor {
 			for (int d : dist)
 				if (d < DIST_UNREACHABLE)
 					aggTotalDistance += d;
-
 		}
 
 		float clusteringCoeff = aggClustering / graph.length;
@@ -61,6 +43,37 @@ public class DataProcessor {
 		float apl = aggTotalDistance / (float) (graph.length * (graph.length - 1));
 
 		return new SimulationDataMessage(graph.length, inDegreeDistr, clusteringCoeff, apl);
+	}
+
+	private float calcLocalClustering(int node, boolean[][] graph) {
+		List<Integer> neighbors = new ArrayList<Integer>();
+
+		// Get neighbors of the current node
+		for (int neighbor = 0; neighbor < graph.length; neighbor++)
+			if (graph[node][neighbor])
+				neighbors.add(neighbor);
+
+		// Graph induced by a node with less than two neighbors has 0 edges
+		// clustering coefficient equals to 0
+		if (neighbors.size() < 2)
+			return 0;
+
+		int edges = 0;
+
+		for (int n1 : neighbors) {
+			// Count the number of edges of the graph induced by the
+			// current node (edges between current node neighbors)
+			for (int n2 : neighbors) {
+				// Skip edges pointing to current node and to n1 itself
+				if (n2 == node || n2 == n1)
+					continue;
+
+				if (graph[n1][n2])
+					edges++;
+			}
+		}
+
+		return edges / (float) neighbors.size() * (neighbors.size() - 1);
 	}
 
 	private static int[] shortestPath(int src, boolean[][] graph) {

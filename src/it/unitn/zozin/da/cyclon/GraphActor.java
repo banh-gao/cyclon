@@ -21,10 +21,6 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 
 	}
 
-	private enum Uninitialized implements StateData {
-		Uninitialized
-	}
-
 	class NodesCount implements StateData {
 
 		private final int totalNodes;
@@ -45,7 +41,7 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 	}
 
 	{
-		startWith(State.Idle, Uninitialized.Uninitialized);
+		startWith(State.Idle, null);
 
 		when(State.Idle, matchEvent(AddNodeMessage.class, (addNodeMsg, data) -> processAddNode()));
 
@@ -105,7 +101,7 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 		nodesCount.increaseOne();
 		if (nodesCount.isCompleted()) {
 			taskSender.tell(new EndRoundMessage(), self());
-			return goTo(State.Idle).using(Uninitialized.Uninitialized);
+			return goTo(State.Idle);
 		}
 		return stay();
 	}
@@ -133,7 +129,7 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 		if (count.isCompleted()) {
 			SimulationDataMessage processed = dataProcessor.processSample(adjacencyMatrix);
 			taskSender.tell(processed, self());
-			return goTo(State.Idle).using(Uninitialized.Uninitialized);
+			return goTo(State.Idle);
 		}
 		return stay();
 	}

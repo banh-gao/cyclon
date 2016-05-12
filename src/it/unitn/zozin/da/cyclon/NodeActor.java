@@ -20,10 +20,6 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 
 	}
 
-	private enum Uninitialized implements StateData {
-		Uninitialized
-	}
-
 	class JoinAnswerCount implements StateData {
 
 		private final int total;
@@ -43,7 +39,7 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 	}
 
 	{
-		startWith(State.Uninitialized, Uninitialized.Uninitialized);
+		startWith(State.Uninitialized, null);
 
 		// Possible (state,event) combinations after initialization //
 
