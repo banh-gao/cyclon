@@ -63,8 +63,9 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 	boolean[][] adjacencyMatrix;
 
 	private akka.actor.FSM.State<State, StateData> processAddNode() {
-		ActorRef newNode = context().actorOf(Props.create(NodeActor.class), "" + nodeNum++);
-		sender().tell(new AddNodeEndedMessage(newNode), self());
+		int nodeIndex = nodeNum++;
+		ActorRef newNode = context().actorOf(Props.create(NodeActor.class), "" + nodeIndex);
+		sender().tell(new AddNodeEndedMessage(newNode, nodeIndex), self());
 		return stay();
 	}
 
@@ -144,9 +145,11 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 	public static class AddNodeEndedMessage {
 
 		final ActorRef newNode;
+		final int nodeIndex;
 
-		public AddNodeEndedMessage(ActorRef newNode) {
+		public AddNodeEndedMessage(ActorRef newNode, int nodeIndex) {
 			this.newNode = newNode;
+			this.nodeIndex = nodeIndex;
 		}
 
 	}

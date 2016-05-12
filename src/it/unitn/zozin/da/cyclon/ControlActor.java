@@ -1,6 +1,5 @@
 package it.unitn.zozin.da.cyclon;
 
-import it.unitn.zozin.da.cyclon.ControlActor.Configuration.Topology;
 import it.unitn.zozin.da.cyclon.DataProcessor.SimulationDataMessage;
 import it.unitn.zozin.da.cyclon.GraphActor.AddNodeEndedMessage;
 import it.unitn.zozin.da.cyclon.GraphActor.AddNodeMessage;
@@ -11,9 +10,11 @@ import it.unitn.zozin.da.cyclon.NodeActor.StartJoinMessage;
 import it.unitn.zozin.da.cyclon.NodeActor.StartRoundMessage;
 import java.io.FileInputStream;
 import java.io.IOException;
-import java.util.NavigableSet;
+import java.util.Map.Entry;
+import java.util.NavigableMap;
 import java.util.Properties;
-import java.util.TreeSet;
+import java.util.Random;
+import java.util.TreeMap;
 import akka.actor.AbstractFSM;
 import akka.actor.ActorRef;
 import akka.actor.ActorSelection;
@@ -72,6 +73,9 @@ class ControlActor extends AbstractFSM<ControlActor.State, ControlActor.StateDat
 
 	}
 
+	// Used to generate a random graph
+	private final Random rand = new Random();
+
 	private ActorSelection GRAPH;
 
 	private ActorRef simSender;
@@ -99,7 +103,7 @@ class ControlActor extends AbstractFSM<ControlActor.State, ControlActor.StateDat
 	}
 
 	private akka.actor.FSM.State<State, StateData> processNodeAdded(AddNodeEndedMessage message, AddedNodes addedNodes) {
-		addedNodes.increaseOne(message.newNode);
+		addedNodes.increaseOne(message.nodeIndex, message.newNode);
 
 		if (addedNodes.isCompleted())
 			return executeNodesBoot(addedNodes.addedNodes);
@@ -107,11 +111,11 @@ class ControlActor extends AbstractFSM<ControlActor.State, ControlActor.StateDat
 			return stay();
 	}
 
-	private akka.actor.FSM.State<State, StateData> executeNodesBoot(NavigableSet<ActorRef> addedNodes) {
+	private akka.actor.FSM.State<State, StateData> executeNodesBoot(NavigableMap<Integer, ActorRef> addedNodes) {
 		System.out.print("Executing [BOOT]... ");
-		for (ActorRef n : addedNodes) {
-			ActorRef bootNode = getIntroducerNode(addedNodes, n);
-			n.tell(new NodeActor.BootNodeMessage(conf.CYCLON_CACHE_SIZE, conf.CYCLON_SHUFFLE_LENGTH, bootNode), self());
+		for (Entry<Integer, ActorRef> n : addedNodes.entrySet()) {
+			ActorRef bootNode = getIntroducerNode(addedNodes, n.getKey());
+			n.getValue().tell(new NodeActor.BootNodeMessage(conf.CYCLON_CACHE_SIZE, conf.CYCLON_SHUFFLE_LENGTH, bootNode), self());
 		}
 
 		return goTo(State.NodesBoot).using(new CompletionCount(addedNodes.size()));
@@ -120,18 +124,32 @@ class ControlActor extends AbstractFSM<ControlActor.State, ControlActor.StateDat
 	/**
 	 * Determine which node the given node as to use as introducer node
 	 */
-	private ActorRef getIntroducerNode(NavigableSet<ActorRef> addedNodes, ActorRef node) {
-		if (conf.BOOT_TOPOLOGY == Topology.CHAIN) {
-			ActorRef introducer = addedNodes.higher(node);
+	private ActorRef getIntroducerNode(NavigableMap<Integer, ActorRef> addedNodes, int nodeIndex) {
+		Entry<Integer, ActorRef> introducerE = null;
+		switch (conf.BOOT_TOPOLOGY) {
+			case CHAIN :
+				introducerE = addedNodes.higherEntry(nodeIndex);
 
-			if (introducer == null)
-				introducer = addedNodes.first();
+				if (introducerE == null)
+					introducerE = addedNodes.firstEntry();
 
-			return introducer;
-		} else {
-			// Star topology centered on first node
-			return addedNodes.first();
+				break;
+			case STAR :
+				// Star topology is centered on first node
+				introducerE = addedNodes.firstEntry();
+				break;
+			case RANDOM :
+				introducerE = addedNodes.higherEntry(rand.nextInt(addedNodes.size()));
+
+				if (introducerE == null)
+					introducerE = addedNodes.firstEntry();
+
+				break;
+			default :
+				throw new AssertionError();
 		}
+
+		return introducerE.getValue();
 	}
 
 	private akka.actor.FSM.State<State, StateData> processNodeBooted(BootNodeEndedMessage message, CompletionCount count) {
@@ -209,7 +227,7 @@ class ControlActor extends AbstractFSM<ControlActor.State, ControlActor.StateDat
 	public static class Configuration implements StateData {
 
 		enum Topology {
-			CHAIN, STAR
+			CHAIN, STAR, RANDOM
 		};
 
 		public Topology BOOT_TOPOLOGY;
@@ -235,14 +253,14 @@ class ControlActor extends AbstractFSM<ControlActor.State, ControlActor.StateDat
 	class AddedNodes implements StateData {
 
 		private final int totalNodes;
-		private final NavigableSet<ActorRef> addedNodes = new TreeSet<ActorRef>();
+		private final NavigableMap<Integer, ActorRef> addedNodes = new TreeMap<Integer, ActorRef>();
 
 		public AddedNodes(int totalNodes) {
 			this.totalNodes = totalNodes;
 		}
 
-		public void increaseOne(ActorRef addedNode) {
-			addedNodes.add(addedNode);
+		public void increaseOne(int index, ActorRef node) {
+			addedNodes.put(index, node);
 		}
 
 		public boolean isCompleted() {
