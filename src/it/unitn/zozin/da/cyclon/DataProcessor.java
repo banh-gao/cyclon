@@ -1,6 +1,7 @@
 package it.unitn.zozin.da.cyclon;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -15,6 +16,8 @@ public class DataProcessor {
 		float aggClustering = 0;
 		int aggTotalDistance = 0;
 
+		RoundData data = new RoundData();
+
 		for (int node = 0; node < graph.length; node++) {
 			if (params.contains(GraphProperty.PATH_LEN))
 				aggTotalDistance += calcNodePathSum(node, graph);
@@ -24,9 +27,20 @@ public class DataProcessor {
 				calcInDegree(node, graph, inDegreeDistr);
 		}
 
-		float clusteringCoeff = aggClustering / graph.length;
-		float apl = aggTotalDistance / (float) (graph.length * (graph.length - 1));
-		return new RoundData(graph.length, inDegreeDistr, clusteringCoeff, apl);
+		if (params.contains(GraphProperty.PATH_LEN)) {
+			float apl = aggTotalDistance / (float) (graph.length * (graph.length - 1));
+			data.addData(GraphProperty.PATH_LEN, apl);
+		}
+
+		if (params.contains(GraphProperty.CLUSTERING)) {
+			float clusteringCoeff = aggClustering / graph.length;
+			data.addData(GraphProperty.CLUSTERING, clusteringCoeff);
+		}
+		if (params.contains(GraphProperty.IN_DEGREE))
+			data.addData(GraphProperty.IN_DEGREE, inDegreeDistr);
+
+		return data;
+
 	}
 
 	private void calcInDegree(int node, boolean[][] graph, Map<Integer, Integer> inDegreeDistr) {
@@ -124,23 +138,16 @@ public class DataProcessor {
 
 	public static class RoundData {
 
-		final Map<Integer, Integer> inDegreeDistr;
-		final float clusteringCoeff;
-		final float apl;
-		final int totalNodes;
+		final Map<GraphProperty, Object> roundValues = new HashMap<DataProcessor.GraphProperty, Object>();
 
-		public RoundData(int totalNodes, Map<Integer, Integer> degreeDistr, float clusteringCoeff, float apl) {
-			this.totalNodes = totalNodes;
-			this.inDegreeDistr = degreeDistr;
-			this.clusteringCoeff = clusteringCoeff;
-			this.apl = apl;
+		public void addData(GraphProperty prop, Object data) {
+			roundValues.put(prop, data);
 		}
 
 		@Override
 		public String toString() {
-			return "RoundData [inDegreeDistr=" + inDegreeDistr + ", clusteringCoeff=" + clusteringCoeff + ", apl=" + apl + ", totalNodes=" + totalNodes + "]";
+			return "RoundData " + roundValues;
 		}
-
 	}
 
 	public static enum GraphProperty {
