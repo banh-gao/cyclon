@@ -24,9 +24,10 @@ import java.util.Set;
 import java.util.TreeMap;
 import akka.actor.AbstractFSM;
 import akka.actor.ActorRef;
-import akka.actor.ActorSelection;
+import akka.actor.ActorSystem;
+import akka.actor.Props;
 
-class ControlActor extends AbstractFSM<ControlActor.State, ControlActor.StateData> {
+class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationActor.StateData> {
 
 	enum State {
 		Idle,
@@ -110,14 +111,18 @@ class ControlActor extends AbstractFSM<ControlActor.State, ControlActor.StateDat
 	// Used to generate a random graph
 	private final Random rand = new Random();
 
-	private ActorSelection GRAPH;
+	private ActorRef GRAPH;
 
 	private ActorRef simSender;
 	private Configuration conf;
 
+	public static ActorRef newActor(ActorSystem sys) {
+		return sys.actorOf(Props.create(SimulationActor.class), "control");
+	}
+
 	@Override
 	public void preStart() throws Exception {
-		GRAPH = context().actorSelection("../graph");
+		GRAPH = context().actorOf(Props.create(GraphActor.class), "graph");
 	}
 
 	private akka.actor.FSM.State<State, StateData> initSimulation(Configuration conf) {
