@@ -1,11 +1,13 @@
 package it.unitn.zozin.da.cyclon;
 
-import it.unitn.zozin.da.cyclon.DataProcessor.SimulationDataMessage;
+import it.unitn.zozin.da.cyclon.DataProcessor.GraphProperty;
+import it.unitn.zozin.da.cyclon.DataProcessor.RoundData;
 import it.unitn.zozin.da.cyclon.NodeActor.EndJoinMessage;
 import it.unitn.zozin.da.cyclon.NodeActor.EndRoundMessage;
 import it.unitn.zozin.da.cyclon.NodeActor.MeasureDataMessage;
 import it.unitn.zozin.da.cyclon.NodeActor.StartJoinMessage;
 import it.unitn.zozin.da.cyclon.NodeActor.StartRoundMessage;
+import java.util.Set;
 import scala.collection.JavaConversions;
 import akka.actor.AbstractFSM;
 import akka.actor.ActorRef;
@@ -27,8 +29,27 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 		private int count;
 
 		public NodesCount(int totalNodes) {
-			super();
 			this.totalNodes = totalNodes;
+		}
+
+		public void increaseOne() {
+			count += 1;
+		}
+
+		public boolean isCompleted() {
+			return count == totalNodes;
+		}
+	}
+
+	class MeasureStateData implements StateData {
+
+		private final int totalNodes;
+		private int count;
+		final Set<GraphProperty> params;
+
+		public MeasureStateData(int totalNodes, Set<GraphProperty> params) {
+			this.totalNodes = totalNodes;
+			this.params = params;
 		}
 
 		public void increaseOne() {
@@ -51,8 +72,8 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 		when(State.Idle, matchEvent(StartRoundMessage.class, (startRoundMsg, data) -> startRound(startRoundMsg)));
 		when(State.RoundRunning, matchEvent(NodeActor.EndRoundMessage.class, NodesCount.class, (endRoundMsg, nodesCount) -> processEndRound(nodesCount)));
 
-		when(State.Idle, matchEvent(StartMeasureMessage.class, (startMeasureMsg, data) -> startMeasure()));
-		when(State.MeasureRunning, matchEvent(NodeActor.MeasureDataMessage.class, NodesCount.class, (measureDataMsg, nodesCount) -> processNodeMeasure(measureDataMsg, nodesCount)));
+		when(State.Idle, matchEvent(StartMeasureMessage.class, (startMeasureMsg, data) -> startMeasure(startMeasureMsg)));
+		when(State.MeasureRunning, matchEvent(NodeActor.MeasureDataMessage.class, MeasureStateData.class, (measureDataMsg, nodesCount) -> processNodeMeasure(measureDataMsg, nodesCount)));
 	}
 
 	// Task processing state
@@ -107,7 +128,7 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 		return stay();
 	}
 
-	private akka.actor.FSM.State<State, StateData> startMeasure() {
+	private akka.actor.FSM.State<State, StateData> startMeasure(StartMeasureMessage msg) {
 		int pendingNodes = 0;
 		taskSender = sender();
 		for (ActorRef c : JavaConversions.asJavaIterable(context().children())) {
@@ -116,20 +137,20 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 		}
 
 		adjacencyMatrix = new boolean[pendingNodes][pendingNodes];
-		return goTo(State.MeasureRunning).using(new NodesCount(pendingNodes));
+		return goTo(State.MeasureRunning).using(new MeasureStateData(pendingNodes, msg.params));
 	}
 
-	private akka.actor.FSM.State<State, StateData> processNodeMeasure(MeasureDataMessage measure, NodesCount count) {
-		count.increaseOne();
+	private akka.actor.FSM.State<State, StateData> processNodeMeasure(MeasureDataMessage measure, MeasureStateData measureStateData) {
+		measureStateData.increaseOne();
 		int node = toIndex(sender());
 		for (ActorRef a : measure.neighbors) {
 			int neighbor = toIndex(a);
 			adjacencyMatrix[node][neighbor] = true;
 		}
 
-		if (count.isCompleted()) {
-			SimulationDataMessage processed = dataProcessor.processSample(adjacencyMatrix);
-			taskSender.tell(processed, self());
+		if (measureStateData.isCompleted()) {
+			RoundData processedRound = dataProcessor.processRoundSample(measureStateData.params, adjacencyMatrix);
+			taskSender.tell(processedRound, self());
 			return goTo(State.Idle);
 		}
 		return stay();
@@ -155,5 +176,12 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 	}
 
 	public static class StartMeasureMessage {
+
+		final Set<GraphProperty> params;
+
+		public StartMeasureMessage(Set<GraphProperty> params) {
+			super();
+			this.params = params;
+		}
 	}
 }

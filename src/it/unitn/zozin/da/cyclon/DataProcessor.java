@@ -3,51 +3,39 @@ package it.unitn.zozin.da.cyclon;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 
 public class DataProcessor {
 
 	private static final int DIST_UNREACHABLE = Integer.MAX_VALUE;
 
-	public SimulationDataMessage processSample(boolean[][] graph) {
+	public RoundData processRoundSample(Set<GraphProperty> params, boolean[][] graph) {
 		Map<Integer, Integer> inDegreeDistr = new TreeMap<Integer, Integer>();
 		float aggClustering = 0;
 		int aggTotalDistance = 0;
-		int diameter = 0;
 
 		for (int node = 0; node < graph.length; node++) {
-			// /////// In-degree distribution ////////////
-
-			int nodeInDegree = 0;
-			// Count nodes pointing to this node
-			for (int neighbor = 0; neighbor < graph.length; neighbor++)
-				if (graph[neighbor][node])
-					nodeInDegree++;
-			inDegreeDistr.compute(nodeInDegree, (k, v) -> (v == null) ? 1 : v + 1);
-
-			// /////// Global Clustering coefficient ////////////
-
-			aggClustering += calcLocalClustering(node, graph);
-
-			// /////// Average path length (using Dijkstra) ////////////
-
-			int[] dist = shortestPath(node, graph);
-			for (int n2 = 0; n2 < dist.length; n2++) {
-				// Ignore unreachable nodes
-				if (dist[n2] == DIST_UNREACHABLE)
-					continue;
-
-				aggTotalDistance += dist[n2];
-
-				// Maximum path length is the graph diameter
-				if (dist[n2] > diameter)
-					diameter = dist[n2];
-			}
+			if (params.contains(GraphProperty.PATH_LEN))
+				aggTotalDistance += calcNodePathSum(node, graph);
+			if (params.contains(GraphProperty.CLUSTERING))
+				aggClustering += calcLocalClustering(node, graph);
+			if (params.contains(GraphProperty.IN_DEGREE))
+				calcInDegree(node, graph, inDegreeDistr);
 		}
 
 		float clusteringCoeff = aggClustering / graph.length;
 		float apl = aggTotalDistance / (float) (graph.length * (graph.length - 1));
-		return new SimulationDataMessage(graph.length, inDegreeDistr, clusteringCoeff, apl, diameter);
+		return new RoundData(graph.length, inDegreeDistr, clusteringCoeff, apl);
+	}
+
+	private void calcInDegree(int node, boolean[][] graph, Map<Integer, Integer> inDegreeDistr) {
+		int nodeInDegree = 0;
+		// Count nodes pointing to this node
+		for (int neighbor = 0; neighbor < graph.length; neighbor++)
+			if (graph[neighbor][node])
+				nodeInDegree++;
+		inDegreeDistr.compute(nodeInDegree, (k, v) -> (v == null) ? 1 : v + 1);
 	}
 
 	private float calcLocalClustering(int node, boolean[][] graph) {
@@ -80,6 +68,19 @@ public class DataProcessor {
 
 		float local = edges / (float) (neighbors.size() * (neighbors.size() - 1));
 		return local;
+	}
+
+	private int calcNodePathSum(int node, boolean[][] graph) {
+		int nodeDist = 0;
+		int[] dist = shortestPath(node, graph);
+		for (int n2 = 0; n2 < dist.length; n2++) {
+			// Ignore unreachable nodes
+			if (dist[n2] == DIST_UNREACHABLE)
+				continue;
+
+			nodeDist += dist[n2];
+		}
+		return nodeDist;
 	}
 
 	private static int[] shortestPath(int src, boolean[][] graph) {
@@ -121,26 +122,29 @@ public class DataProcessor {
 			return DIST_UNREACHABLE;
 	}
 
-	public static class SimulationDataMessage {
+	public static class RoundData {
 
 		final Map<Integer, Integer> inDegreeDistr;
 		final float clusteringCoeff;
 		final float apl;
-		final int diameter;
 		final int totalNodes;
 
-		public SimulationDataMessage(int totalNodes, Map<Integer, Integer> degreeDistr, float clusteringCoeff, float apl, int diameter) {
+		public RoundData(int totalNodes, Map<Integer, Integer> degreeDistr, float clusteringCoeff, float apl) {
 			this.totalNodes = totalNodes;
 			this.inDegreeDistr = degreeDistr;
 			this.clusteringCoeff = clusteringCoeff;
 			this.apl = apl;
-			this.diameter = diameter;
 		}
 
 		@Override
 		public String toString() {
-			return "SimulationDataMessage [inDegreeDistr=" + inDegreeDistr + ", clusteringCoeff=" + clusteringCoeff + ", apl=" + apl + ", diameter=" + diameter + ", totalNodes=" + totalNodes + "]";
+			return "RoundData [inDegreeDistr=" + inDegreeDistr + ", clusteringCoeff=" + clusteringCoeff + ", apl=" + apl + ", totalNodes=" + totalNodes + "]";
 		}
 
 	}
+
+	public static enum GraphProperty {
+		IN_DEGREE, PATH_LEN, CLUSTERING
+	};
+
 }

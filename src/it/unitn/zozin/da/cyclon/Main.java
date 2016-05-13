@@ -1,7 +1,7 @@
 package it.unitn.zozin.da.cyclon;
 
 import it.unitn.zozin.da.cyclon.ControlActor.Configuration;
-import it.unitn.zozin.da.cyclon.DataProcessor.SimulationDataMessage;
+import it.unitn.zozin.da.cyclon.ControlActor.SimulationDataMessage;
 import java.io.FileInputStream;
 import java.io.PrintStream;
 import java.util.Map.Entry;
