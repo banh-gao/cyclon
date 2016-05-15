@@ -251,7 +251,7 @@ class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationActor
 
 		if (simulationMeasure.isCompleted()) {
 			// Send report back to simulation starter
-			simSender.tell(new SimulationDataMessage(simulationMeasure.simData), self());
+			simSender.tell(new SimulationDataMessage(conf, simulationMeasure.simData), self());
 			return goTo(State.Idle);
 		} else {
 			return executeProtocolRound(simulationMeasure);
@@ -324,12 +324,18 @@ class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationActor
 
 	public static class SimulationDataMessage {
 
+		final Configuration conf;
 		final Map<Integer, RoundData> simData = new HashMap<Integer, RoundData>();
 
-		public SimulationDataMessage(List<RoundData> simData) {
+		public SimulationDataMessage(Configuration conf, List<RoundData> simData) {
+			this.conf = conf;
 			for (int round = 0; round < simData.size(); round++)
 				this.simData.put(round, simData.get(round));
 		}
 
+		@Override
+		public String toString() {
+			return "SimulationDataMessage [conf=" + conf + ", simData=" + simData + "]";
+		}
 	}
 }

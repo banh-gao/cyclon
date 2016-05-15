@@ -98,7 +98,7 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 	}
 
 	private akka.actor.FSM.State<State, StateData> performJoin() {
-		ActorRef introducer = cache.getOldestNeighbor().address;
+		ActorRef introducer = cache.selectOldestNeighbor().address;
 
 		introducer.tell(new CyclonJoin(JOIN_TTL + 1), self());
 
@@ -109,7 +109,7 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 		joinAnsCount.increaseOne();
 
 		// Save received nodes in cache
-		cache.updateNeighbors(answer.nodes, false);
+		cache.updateNeighbors(answer.nodes, true);
 
 		if (joinAnsCount.isCompleted()) {
 			context().parent().tell(new EndJoinMessage(), self());
@@ -155,7 +155,7 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 		Neighbor dest = cache.selectOldestNeighbor();
 
 		// Get random neighbors (excluding destination neighbor)
-		List<Neighbor> requestNodes = cache.selectRandomNeighbors(shuffleLength - 1, dest);
+		List<Neighbor> requestNodes = cache.selectRandomNeighbors(shuffleLength - 1, dest.address);
 
 		// Add fresh local node address
 		requestNodes.add(selfAddress);
@@ -170,7 +170,7 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 		answer.nodes.remove(selfAddress);
 
 		// Save received nodes in cache
-		cache.updateNeighbors(answer.nodes, false);
+		cache.updateNeighbors(answer.nodes, true);
 
 		// Complete node protocol simulation round
 		sendRoundCompletedStatus();
@@ -184,22 +184,16 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 
 	private akka.actor.FSM.State<State, StateData> processCyclonRequest(CyclonNodeRequest req) {
 		// Remove itself (if present)
-		req.nodes.remove(selfAddress);
+		if (req.nodes.remove(selfAddress))
+			System.out.println(stateName().toString() + "REQ");
 
-		sendCyclonAnswer();
+		List<Neighbor> ansNodes = cache.selectRandomNeighbors(shuffleLength, sender());
+		sender().tell(new CyclonNodeAnswer(ansNodes), self());
 
-		// Handle special case in which a request arrives while the local node
-		// is waiting for an answer to its own request. In this case the entries
-		// that can can be replaced when the answer arrives correspond to the
-		// new entries just stored in the cache with this request.
-		cache.updateNeighbors(req.nodes, true);
+		assert (req.nodes.size() <= cache.selectedEntries.size() + cache.freeSlots()) : "ANS: " + ansNodes.size() + "REPL: " + cache.selectedEntries.size() + " CACHE: " + cache.size();
+		cache.updateNeighbors(req.nodes, false);
 
 		return stay();
-	}
-
-	private void sendCyclonAnswer() {
-		List<Neighbor> ansNodes = cache.selectRandomNeighbors(shuffleLength);
-		sender().tell(new CyclonNodeAnswer(ansNodes), self());
 	}
 
 	private akka.actor.FSM.State<State, StateData> processMeasureRequest() {

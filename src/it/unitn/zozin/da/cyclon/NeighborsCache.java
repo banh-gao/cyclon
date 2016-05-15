@@ -20,10 +20,10 @@ public class NeighborsCache {
 	private final List<Neighbor> cache;
 
 	private final Random rand;
-	private Set<Integer> replaceableEntries;
+	Set<Integer> selectedEntries;
 
 	public NeighborsCache(int maxSize) {
-		replaceableEntries = new HashSet<Integer>();
+		selectedEntries = new HashSet<Integer>();
 		rand = new Random(SEED);
 		this.MAX_SIZE = maxSize;
 
@@ -35,19 +35,28 @@ public class NeighborsCache {
 			n.age += 1;
 	}
 
-	public Neighbor getOldestNeighbor() {
-		Neighbor oldest = cache.get(0);
-		for (int i = 1; i < cache.size(); i++)
-			if (cache.get(i).age > oldest.age)
-				oldest = cache.get(i);
+	public Neighbor selectOldestNeighbor() {
+		int oldestIndex = getOldestEntry();
 
-		return oldest;
+		selectedEntries.add(oldestIndex);
+		return cache.get(oldestIndex);
 	}
 
-	public Neighbor selectOldestNeighbor() {
-		Neighbor oldest = getOldestNeighbor();
-		replaceableEntries.add(cache.indexOf(oldest));
-		return oldest;
+	private int getOldestEntry() {
+		int oldestAge = -1;
+		int oldestIndex = -1;
+
+		for (int i = 0; i < cache.size(); i++) {
+			int age = cache.get(i).age;
+			if (age > oldestAge) {
+				oldestAge = age;
+				oldestIndex = i;
+			}
+		}
+
+		assert (0 <= oldestIndex && oldestIndex < cache.size());
+
+		return oldestIndex;
 	}
 
 	public Neighbor getRandomNeighbor() {
@@ -58,49 +67,49 @@ public class NeighborsCache {
 		return selectRandomNeighbors(shuffleLength, null);
 	}
 
-	public List<Neighbor> selectRandomNeighbors(int shuffleLength, Neighbor exclude) {
-		List<Neighbor> out = new ArrayList<Neighbor>(cache);
-		if (exclude != null)
-			out.remove(exclude);
+	public List<Neighbor> selectRandomNeighbors(int shuffleLength, ActorRef exclude) {
+		List<Neighbor> out = new ArrayList<Neighbor>();
 
-		Collections.shuffle(out, rand);
+		List<Integer> selected = IntStream.range(0, cache.size()).boxed().collect(Collectors.toList());
+		Collections.shuffle(selected, rand);
+		selected = selected.subList(0, shuffleLength);
 
-		List<Neighbor> neighbors = out.subList(0, Math.min(shuffleLength, out.size()));
+		selectedEntries.addAll(selected);
 
-		neighbors.stream().forEach((n) -> replaceableEntries.add(cache.indexOf(n)));
+		for (Integer i : selected) {
+			Neighbor n = cache.get(i);
+			if (exclude == null || !n.address.equals(exclude)) {
+				out.add(cache.get(i));
+			}
+		}
 
-		return neighbors;
+		return out;
 	}
 
-	public void updateNeighbors(Collection<Neighbor> newEntries, boolean overwrite) {
+	public void updateNeighbors(Collection<Neighbor> newEntries, boolean overwriteOldest) {
 
-		Iterator<Integer> replaceableEntriesIter = replaceableEntries.iterator();
-
-		Iterator<Integer> overwritableIter = null;
-		Set<Integer> overwritable = IntStream.range(0, cache.size()).boxed().collect(Collectors.toSet());
-		overwritable.removeAll(replaceableEntries);
-		overwritableIter = overwritable.iterator();
+		Iterator<Integer> replaceableEntriesIter = selectedEntries.iterator();
 
 		for (Neighbor newNeighbor : newEntries) {
 			// If the are no free cache slots, remove a replaceable entry before
 			// inserting the new one
 
-			int entryIndex = (cache.size() == 0) ? 0 : cache.size() - 1;
+			int newEntryIndex = (cache.size() == 0) ? 0 : cache.size() - 1;
 
 			if (freeSlots() == 0) {
-				if (!replaceableEntriesIter.hasNext()) {
-					entryIndex = overwritableIter.next();
+				if (!replaceableEntriesIter.hasNext() && overwriteOldest) {
+					newEntryIndex = getOldestEntry();
 				} else {
-					entryIndex = replaceableEntriesIter.next();
+					newEntryIndex = replaceableEntriesIter.next();
 					replaceableEntriesIter.remove();
 				}
 
 				// INVARIANCE: The replaceable entry has always to be present in
 				// current neighbors (remove returns true if present)
-				assert (cache.remove(entryIndex) != null) : entryIndex + " not in cache: " + cache;
+				assert (cache.remove(newEntryIndex) != null) : newEntryIndex + " not in cache: " + cache;
 			}
 
-			cache.add(entryIndex, newNeighbor);
+			cache.add(newEntryIndex, newNeighbor);
 		}
 
 		// INVARIANCE: cache size never exceeds maximum size
