@@ -7,9 +7,9 @@ import it.unitn.zozin.da.cyclon.NodeActor.MeasureDataMessage;
 import it.unitn.zozin.da.cyclon.NodeActor.StartRoundMessage;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.NavigableMap;
+import java.util.NavigableSet;
 import java.util.Set;
-import java.util.TreeMap;
+import java.util.TreeSet;
 import scala.collection.JavaConversions;
 import akka.actor.AbstractFSM;
 import akka.actor.ActorRef;
@@ -85,11 +85,11 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 	boolean[][] adjacencyMatrix;
 
 	private akka.actor.FSM.State<State, StateData> processAddNodes(AddNodesMessage addMsg) {
-		NavigableMap<Integer, ActorRef> addedNodes = new TreeMap<Integer, ActorRef>();
+		NavigableSet<Integer> addedNodes = new TreeSet<Integer>();
 
 		for (int i = 0; i < addMsg.requiredNodes; i++) {
-			ActorRef newNode = context().actorOf(Props.create(NodeActor.class, addMsg.cacheSize, addMsg.shuffleLength), "" + i);
-			addedNodes.put(i, newNode);
+			context().actorOf(Props.create(NodeActor.class, addMsg.cacheSize, addMsg.shuffleLength), Integer.toString(i));
+			addedNodes.add(i);
 		}
 
 		sender().tell(new AddNodesEndedMessage(addedNodes), self());
@@ -189,9 +189,9 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 
 	public static class AddNodesEndedMessage {
 
-		final NavigableMap<Integer, ActorRef> addedNodes;
+		final NavigableSet<Integer> addedNodes;
 
-		public AddNodesEndedMessage(NavigableMap<Integer, ActorRef> addedNodes) {
+		public AddNodesEndedMessage(NavigableSet<Integer> addedNodes) {
 			this.addedNodes = addedNodes;
 		}
 

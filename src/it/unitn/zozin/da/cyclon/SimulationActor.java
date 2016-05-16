@@ -14,11 +14,11 @@ import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
-import java.util.NavigableMap;
+import java.util.NavigableSet;
 import java.util.Properties;
 import java.util.Random;
 import java.util.Set;
+import java.util.function.BiFunction;
 import akka.actor.AbstractFSM;
 import akka.actor.ActorRef;
 import akka.actor.ActorSystem;
@@ -75,9 +75,6 @@ class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationState
 		}
 	}
 
-	// Used to generate a random graph
-	private final Random rand = new Random();
-
 	private ActorRef GRAPH;
 
 	private ActorRef simSender;
@@ -100,47 +97,17 @@ class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationState
 		return goTo(State.NodesAdding);
 	}
 
-	private akka.actor.FSM.State<State, SimulationStateData> executeNodesBoot(NavigableMap<Integer, ActorRef> addedNodes) {
+	private akka.actor.FSM.State<State, SimulationStateData> executeNodesBoot(NavigableSet<Integer> addedNodes) {
 		System.out.print("Executing [BOOT]... ");
 		Map<Integer, Integer> introducers = new HashMap<Integer, Integer>();
-		for (Entry<Integer, ActorRef> n : addedNodes.entrySet()) {
-			introducers.put(n.getKey(), getIntroducerNode(addedNodes, n.getKey()));
+		for (int n : addedNodes) {
+			int introducer = conf.BOOT_TOPOLOGY.topologyFunc.apply(addedNodes, n);
+			introducers.put(n, introducer);
 		}
 
 		GRAPH.tell(new GraphActor.BootNodesMessage(introducers), self());
 
 		return goTo(State.NodesBoot);
-	}
-
-	/**
-	 * Determine which node the given node as to use as introducer node
-	 */
-	private Integer getIntroducerNode(NavigableMap<Integer, ActorRef> addedNodes, int nodeIndex) {
-		Entry<Integer, ActorRef> introducerE = null;
-		switch (conf.BOOT_TOPOLOGY) {
-			case CHAIN :
-				introducerE = addedNodes.higherEntry(nodeIndex);
-
-				if (introducerE == null)
-					introducerE = addedNodes.firstEntry();
-
-				break;
-			case STAR :
-				// Star topology is centered on first node
-				introducerE = addedNodes.firstEntry();
-				break;
-			case RANDOM :
-				introducerE = addedNodes.higherEntry(rand.nextInt(addedNodes.size()));
-
-				if (introducerE == null)
-					introducerE = addedNodes.firstEntry();
-
-				break;
-			default :
-				throw new AssertionError();
-		}
-
-		return introducerE.getKey();
 	}
 
 	private akka.actor.FSM.State<State, SimulationStateData> startSimulation() {
@@ -206,8 +173,25 @@ class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationState
 	// Simulation param message
 	public static class Configuration {
 
+		// Used to generate a random graph
+		private static final Random rand = new Random();
+
 		enum Topology {
-			CHAIN, STAR, RANDOM
+			CHAIN((nodes, i) -> {
+				return (nodes.higher(i) != null) ? nodes.higher(i) : nodes.first();
+			}),
+			STAR((nodes, i) -> nodes.first()),
+			RANDOM((nodes, i) -> nodes.ceiling(rand.nextInt(nodes.size())));
+
+			private final BiFunction<NavigableSet<Integer>, Integer, Integer> topologyFunc;
+
+			private Topology(BiFunction<NavigableSet<Integer>, Integer, Integer> topologyFunc) {
+				this.topologyFunc = topologyFunc;
+			}
+
+			int getIntroducerNode(NavigableSet<Integer> addedNodes, int nodeIndex) {
+				return topologyFunc.apply(addedNodes, nodeIndex);
+			}
 		};
 
 		public Topology BOOT_TOPOLOGY;
