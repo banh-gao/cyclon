@@ -138,6 +138,7 @@ public class DataProcessor {
 
 	public static class RoundData {
 
+		public static final RoundData EMPTY_DATA = new RoundData();
 		final Map<GraphProperty, Object> roundValues = new HashMap<DataProcessor.GraphProperty, Object>();
 
 		public void addData(GraphProperty prop, Object data) {

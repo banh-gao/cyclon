@@ -5,9 +5,7 @@ import it.unitn.zozin.da.cyclon.DataProcessor.RoundData;
 import it.unitn.zozin.da.cyclon.GraphActor.AddNodeEndedMessage;
 import it.unitn.zozin.da.cyclon.GraphActor.AddNodeMessage;
 import it.unitn.zozin.da.cyclon.NodeActor.BootNodeEndedMessage;
-import it.unitn.zozin.da.cyclon.NodeActor.EndJoinMessage;
 import it.unitn.zozin.da.cyclon.NodeActor.EndRoundMessage;
-import it.unitn.zozin.da.cyclon.NodeActor.StartJoinMessage;
 import it.unitn.zozin.da.cyclon.NodeActor.StartRoundMessage;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -30,14 +28,10 @@ import akka.actor.Props;
 class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationActor.StateData> {
 
 	enum State {
-		Idle,
-		NodesAdding,
-		PreMeasureRunning,
-		NodesBoot,
-		NodesJoining,
-		RoundRunning,
-		MeasureRunning
+		Idle, NodesAdding, NodesBoot, RoundRunning, MeasureRunning
 	}
+
+	private static final int BOOT_ROUND = 0;
 
 	{
 		startWith(State.Idle, null);
@@ -49,9 +43,7 @@ class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationActor
 		// Prepare simulation
 
 		when(State.NodesAdding, matchEvent(AddNodeEndedMessage.class, AddedNodes.class, (endAddMsg, addedNodes) -> processNodeAdded(endAddMsg, addedNodes)));
-		when(State.PreMeasureRunning, matchEvent(RoundData.class, (measureMsg, data) -> processPreMeasure(measureMsg)));
 		when(State.NodesBoot, matchEvent(BootNodeEndedMessage.class, CompletionCount.class, (endInitMsg, nodeCount) -> processNodeBooted(endInitMsg, nodeCount)));
-		when(State.NodesJoining, matchEvent(EndJoinMessage.class, (endInitMsg, roundCount) -> processJoinEnded()));
 
 		// Run simulation
 
@@ -85,7 +77,6 @@ class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationActor
 	static class SimulationStateData implements StateData {
 
 		private final int total;
-		private static final RoundData EMPTY_DATA = new RoundData();
 
 		final List<RoundData> simData = new LinkedList<RoundData>();
 
@@ -99,10 +90,6 @@ class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationActor
 
 		public boolean isCompleted() {
 			return simData.size() == total;
-		}
-
-		public void increaseRound() {
-			simData.add(EMPTY_DATA);
 		}
 
 		public void increaseRound(RoundData data) {
@@ -202,53 +189,27 @@ class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationActor
 
 		if (count.isCompleted()) {
 			System.out.println("[completed]");
-			return executePreMeasure();
+			return executeMeasure(new SimulationStateData(conf.ROUNDS + 1));
 		} else
 			return stay();
-	}
-
-	private akka.actor.FSM.State<State, StateData> executePreMeasure() {
-		System.out.print("Measuring [BOOT]... ");
-
-		GRAPH.tell(new GraphActor.StartMeasureMessage(conf.FINAL_MEASURE), self());
-		return goTo(State.PreMeasureRunning);
-	}
-
-	private akka.actor.FSM.State<State, StateData> processPreMeasure(RoundData preMeasureMsg) {
-		System.out.println("[completed] -> " + preMeasureMsg);
-		return executeNodesJoin();
-	}
-
-	private akka.actor.FSM.State<State, StateData> executeNodesJoin() {
-		System.out.print("Executing [JOIN]... ");
-		GRAPH.tell(new StartJoinMessage(), self());
-		return goTo(State.NodesJoining);
-	}
-
-	private akka.actor.FSM.State<State, StateData> processJoinEnded() {
-		System.out.println("[completed]");
-
-		// Simulation is excuted for conf.ROUNDS + the join round
-		SimulationStateData simState = new SimulationStateData(conf.ROUNDS + 1);
-		return executeMeasure(simState);
 	}
 
 	private akka.actor.FSM.State<State, StateData> executeMeasure(SimulationStateData simState) {
 
 		Set<GraphProperty> measureParams;
 
-		if (simState.isLast())
+		if (simState.getRound() == BOOT_ROUND || simState.isLast())
 			measureParams = conf.FINAL_MEASURE;
 		else
 			measureParams = conf.ROUND_MEASURE;
 
+		// If there is nothing to measure skip measuring
 		if (measureParams.isEmpty()) {
-			simState.increaseRound();
-			return controlSimulation(simState);
+			return controlRoundEnd(simState, RoundData.EMPTY_DATA);
 		}
 
-		if (simState.getRound() == 0)
-			System.out.print("Measuring [JOIN]... ");
+		if (simState.getRound() == BOOT_ROUND)
+			System.out.print("Measuring [BOOT]... ");
 		else
 			System.out.print("Measuring round " + simState.getRound() + "... ");
 
@@ -256,26 +217,29 @@ class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationActor
 		return goTo(State.MeasureRunning).using(simState);
 	}
 
-	private akka.actor.FSM.State<State, StateData> processMeasure(RoundData roundMeasureMsg, SimulationStateData simulationState) {
+	private akka.actor.FSM.State<State, StateData> processMeasure(RoundData roundMeasureMsg, SimulationStateData simState) {
 		System.out.println("[completed] -> " + roundMeasureMsg);
-
-		simulationState.increaseRound(roundMeasureMsg);
-
-		return controlSimulation(simulationState);
+		return controlRoundEnd(simState, roundMeasureMsg);
 	}
 
-	private akka.actor.FSM.State<State, StateData> controlSimulation(SimulationStateData simulationMeasure) {
-		if (simulationMeasure.isCompleted()) {
+	private akka.actor.FSM.State<State, StateData> controlRoundEnd(SimulationStateData simState, RoundData data) {
+		simState.increaseRound(data);
+
+		if (simState.isCompleted()) {
 			// Send report back to simulation starter
-			simSender.tell(new SimulationDataMessage(conf, simulationMeasure.simData), self());
+			simSender.tell(new SimulationDataMessage(conf, simState.simData), self());
 			return goTo(State.Idle);
 		} else {
-			return executeProtocolRound(simulationMeasure);
+			return executeProtocolRound(simState);
 		}
 	}
 
 	private akka.actor.FSM.State<State, StateData> executeProtocolRound(SimulationStateData simState) {
-		System.out.print("Executing round " + (simState.getRound()) + "... ");
+		if (simState.getRound() == BOOT_ROUND)
+			System.out.print("Executing [BOOT]... ");
+		else
+			System.out.print("Executing round " + (simState.getRound()) + "... ");
+
 		GRAPH.tell(new StartRoundMessage(), self());
 		return goTo(State.RoundRunning).using(simState);
 	}

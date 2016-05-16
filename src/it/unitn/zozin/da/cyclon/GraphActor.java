@@ -2,10 +2,8 @@ package it.unitn.zozin.da.cyclon;
 
 import it.unitn.zozin.da.cyclon.DataProcessor.GraphProperty;
 import it.unitn.zozin.da.cyclon.DataProcessor.RoundData;
-import it.unitn.zozin.da.cyclon.NodeActor.EndJoinMessage;
 import it.unitn.zozin.da.cyclon.NodeActor.EndRoundMessage;
 import it.unitn.zozin.da.cyclon.NodeActor.MeasureDataMessage;
-import it.unitn.zozin.da.cyclon.NodeActor.StartJoinMessage;
 import it.unitn.zozin.da.cyclon.NodeActor.StartRoundMessage;
 import java.util.Set;
 import scala.collection.JavaConversions;
@@ -66,9 +64,6 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 
 		when(State.Idle, matchEvent(AddNodeMessage.class, (addNodeMsg, data) -> processAddNode()));
 
-		when(State.Idle, matchEvent(StartJoinMessage.class, (startJoinMsg, data) -> startJoin(startJoinMsg)));
-		when(State.JoinRunning, matchEvent(EndJoinMessage.class, NodesCount.class, (endJoinMsg, nodesCount) -> processEndJoin(endJoinMsg, nodesCount)));
-
 		when(State.Idle, matchEvent(StartRoundMessage.class, (startRoundMsg, data) -> startRound(startRoundMsg)));
 		when(State.RoundRunning, matchEvent(NodeActor.EndRoundMessage.class, NodesCount.class, (endRoundMsg, nodesCount) -> processEndRound(nodesCount)));
 
@@ -78,34 +73,17 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 
 	// Task processing state
 	private ActorRef taskSender;
-	private int nodeNum = 0;
+
+	// Used to assign node ids
+	private int nextNodeId = 0;
 
 	DataProcessor dataProcessor = new DataProcessor();
 	boolean[][] adjacencyMatrix;
 
 	private akka.actor.FSM.State<State, StateData> processAddNode() {
-		int nodeIndex = nodeNum++;
+		int nodeIndex = nextNodeId++;
 		ActorRef newNode = context().actorOf(Props.create(NodeActor.class), "" + nodeIndex);
 		sender().tell(new AddNodeEndedMessage(newNode, nodeIndex), self());
-		return stay();
-	}
-
-	private akka.actor.FSM.State<State, StateData> startJoin(StartJoinMessage startJoinMsg) {
-		int pendingNodes = 0;
-		taskSender = sender();
-		for (ActorRef c : JavaConversions.asJavaIterable(context().children())) {
-			pendingNodes++;
-			c.tell(startJoinMsg, self());
-		}
-		return goTo(State.JoinRunning).using(new NodesCount(pendingNodes));
-	}
-
-	private akka.actor.FSM.State<State, StateData> processEndJoin(EndJoinMessage endJoinMsg, NodesCount nodesCount) {
-		nodesCount.increaseOne();
-		if (nodesCount.isCompleted()) {
-			taskSender.tell(endJoinMsg, self());
-			return goTo(State.Idle).using(new NodesCount(nodesCount.totalNodes));
-		}
 		return stay();
 	}
 

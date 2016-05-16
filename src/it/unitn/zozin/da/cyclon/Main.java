@@ -32,6 +32,7 @@ public class Main {
 
 	private static void writeResults(SimulationDataMessage data) {
 		try {
+			System.out.println(data);
 			DataLogger.writeData(data);
 		} catch (IOException e) {
 			e.printStackTrace();
