@@ -72,15 +72,14 @@ public class NeighborsCache {
 
 		List<Integer> selected = IntStream.range(0, cache.size()).boxed().collect(Collectors.toList());
 		Collections.shuffle(selected, rand);
-		selected = selected.subList(0, shuffleLength);
+		selected = selected.subList(0, Math.min(shuffleLength, selected.size()));
 
 		selectedEntries.addAll(selected);
 
 		for (Integer i : selected) {
 			Neighbor n = cache.get(i);
-			if (exclude == null || !n.address.equals(exclude)) {
-				out.add(cache.get(i));
-			}
+			if (exclude == null || !n.address.equals(exclude))
+				out.add(n);
 		}
 
 		return out;
@@ -193,9 +192,5 @@ public class NeighborsCache {
 
 	public List<Neighbor> getNeighbors() {
 		return Collections.unmodifiableList(cache);
-	}
-
-	public Neighbor replaceRandomNeighbor(Neighbor neighbor) {
-		return cache.set(cache.indexOf(getRandomNeighbor()), neighbor);
 	}
 }

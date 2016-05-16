@@ -82,9 +82,11 @@ class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationActor
 		}
 	}
 
-	class SimulationStateData implements StateData {
+	static class SimulationStateData implements StateData {
 
 		private final int total;
+		private static final RoundData EMPTY_DATA = new RoundData();
+
 		final List<RoundData> simData = new LinkedList<RoundData>();
 
 		public SimulationStateData(int total) {
@@ -97,6 +99,10 @@ class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationActor
 
 		public boolean isCompleted() {
 			return simData.size() == total;
+		}
+
+		public void increaseRound() {
+			simData.add(EMPTY_DATA);
 		}
 
 		public void increaseRound(RoundData data) {
@@ -228,10 +234,6 @@ class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationActor
 	}
 
 	private akka.actor.FSM.State<State, StateData> executeMeasure(SimulationStateData simState) {
-		if (simState.getRound() == 0)
-			System.out.print("Measuring [JOIN]... ");
-		else
-			System.out.print("Measuring round " + simState.getRound() + "... ");
 
 		Set<GraphProperty> measureParams;
 
@@ -240,15 +242,29 @@ class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationActor
 		else
 			measureParams = conf.ROUND_MEASURE;
 
+		if (measureParams.isEmpty()) {
+			simState.increaseRound();
+			return controlSimulation(simState);
+		}
+
+		if (simState.getRound() == 0)
+			System.out.print("Measuring [JOIN]... ");
+		else
+			System.out.print("Measuring round " + simState.getRound() + "... ");
+
 		GRAPH.tell(new GraphActor.StartMeasureMessage(measureParams), self());
 		return goTo(State.MeasureRunning).using(simState);
 	}
 
-	private akka.actor.FSM.State<State, StateData> processMeasure(RoundData roundMeasureMsg, SimulationStateData simulationMeasure) {
+	private akka.actor.FSM.State<State, StateData> processMeasure(RoundData roundMeasureMsg, SimulationStateData simulationState) {
 		System.out.println("[completed] -> " + roundMeasureMsg);
 
-		simulationMeasure.increaseRound(roundMeasureMsg);
+		simulationState.increaseRound(roundMeasureMsg);
 
+		return controlSimulation(simulationState);
+	}
+
+	private akka.actor.FSM.State<State, StateData> controlSimulation(SimulationStateData simulationMeasure) {
 		if (simulationMeasure.isCompleted()) {
 			// Send report back to simulation starter
 			simSender.tell(new SimulationDataMessage(conf, simulationMeasure.simData), self());
@@ -295,12 +311,14 @@ class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationActor
 			CYCLON_SHUFFLE_LENGTH = Integer.parseInt(props.getProperty("cyclonShuffle"));
 
 			ROUND_MEASURE = new HashSet<DataProcessor.GraphProperty>();
-			for (String m : props.getProperty("roundMeasure", "").split(","))
-				ROUND_MEASURE.add(GraphProperty.valueOf(m.trim().toUpperCase()));
+			if (!props.getProperty("roundMeasure", "").isEmpty())
+				for (String m : props.getProperty("roundMeasure", "").split(","))
+					ROUND_MEASURE.add(GraphProperty.valueOf(m.trim().toUpperCase()));
 
 			FINAL_MEASURE = new HashSet<DataProcessor.GraphProperty>();
-			for (String m : props.getProperty("finalMeasure", "").split(","))
-				FINAL_MEASURE.add(GraphProperty.valueOf(m.trim().toUpperCase()));
+			if (!props.getProperty("finalMeasure", "").isEmpty())
+				for (String m : props.getProperty("finalMeasure", "").split(","))
+					FINAL_MEASURE.add(GraphProperty.valueOf(m.trim().toUpperCase()));
 		}
 	}
 

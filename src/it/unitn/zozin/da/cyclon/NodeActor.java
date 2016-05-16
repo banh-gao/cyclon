@@ -144,9 +144,11 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 	}
 
 	private void sendCyclonJoinAnswer() {
-		Neighbor replaced = cache.replaceRandomNeighbor(new Neighbor(0, sender()));
+		List<Neighbor> selected = cache.selectRandomNeighbors(shuffleLength, sender());
 
-		sender().tell(new CyclonNodeAnswer(Collections.singletonList(replaced)), self());
+		cache.updateNeighbors(Collections.singletonList(new Neighbor(0, sender())), false);
+
+		sender().tell(new CyclonNodeAnswer(selected), self());
 	}
 
 	private akka.actor.FSM.State<State, StateData> sendCyclonRequest() {
@@ -184,13 +186,11 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 
 	private akka.actor.FSM.State<State, StateData> processCyclonRequest(CyclonNodeRequest req) {
 		// Remove itself (if present)
-		if (req.nodes.remove(selfAddress))
-			System.out.println(stateName().toString() + "REQ");
+		req.nodes.remove(selfAddress);
 
 		List<Neighbor> ansNodes = cache.selectRandomNeighbors(shuffleLength, sender());
 		sender().tell(new CyclonNodeAnswer(ansNodes), self());
 
-		assert (req.nodes.size() <= cache.selectedEntries.size() + cache.freeSlots()) : "ANS: " + ansNodes.size() + "REPL: " + cache.selectedEntries.size() + " CACHE: " + cache.size();
 		cache.updateNeighbors(req.nodes, false);
 
 		return stay();
