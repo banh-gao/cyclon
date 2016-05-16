@@ -63,10 +63,15 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 
 	private Neighbor selfAddress;
 
-	private NeighborsCache cache;
-	private int shuffleLength;
+	private final NeighborsCache cache;
+	private final int shuffleLength;
 
 	private boolean isJoined = false;
+
+	public NodeActor(int cacheSize, int shuffleLength) {
+		this.cache = new NeighborsCache(cacheSize);
+		this.shuffleLength = shuffleLength;
+	}
 
 	@Override
 	public void preStart() throws Exception {
@@ -81,11 +86,8 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 	}
 
 	private akka.actor.FSM.State<State, StateData> processInitNode(BootNodeMessage message) {
-		cache = new NeighborsCache(message.cacheSize);
-		shuffleLength = message.shuffleLength;
-
-		// Initialize cache with the boot neighbor
-		cache.updateNeighbors(Collections.singletonList(new Neighbor(0, message.bootNeighbor)), false);
+		// Initialize cache with the boot initializer
+		cache.updateNeighbors(Collections.singletonList(new Neighbor(0, message.introducer)), false);
 
 		sender().tell(new BootNodeEndedMessage(), self());
 		return goTo(State.Idle);
@@ -191,14 +193,10 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 
 	public static class BootNodeMessage {
 
-		final int cacheSize;
-		final int shuffleLength;
-		final ActorRef bootNeighbor;
+		final ActorRef introducer;
 
-		public BootNodeMessage(int cacheSize, int shuffleLength, ActorRef bootNeighbor) {
-			this.cacheSize = cacheSize;
-			this.shuffleLength = shuffleLength;
-			this.bootNeighbor = bootNeighbor;
+		public BootNodeMessage(ActorRef introducer) {
+			this.introducer = introducer;
 		}
 	}
 

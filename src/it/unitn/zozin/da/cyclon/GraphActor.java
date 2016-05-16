@@ -5,7 +5,11 @@ import it.unitn.zozin.da.cyclon.DataProcessor.RoundData;
 import it.unitn.zozin.da.cyclon.NodeActor.EndRoundMessage;
 import it.unitn.zozin.da.cyclon.NodeActor.MeasureDataMessage;
 import it.unitn.zozin.da.cyclon.NodeActor.StartRoundMessage;
+import java.util.Map;
+import java.util.Map.Entry;
+import java.util.NavigableMap;
 import java.util.Set;
+import java.util.TreeMap;
 import scala.collection.JavaConversions;
 import akka.actor.AbstractFSM;
 import akka.actor.ActorRef;
@@ -14,7 +18,7 @@ import akka.actor.Props;
 public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateData> {
 
 	enum State {
-		Idle, JoinRunning, RoundRunning, MeasureRunning
+		Idle, BootRunning, RoundRunning, MeasureRunning
 	}
 
 	interface StateData {
@@ -62,7 +66,10 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 	{
 		startWith(State.Idle, null);
 
-		when(State.Idle, matchEvent(AddNodeMessage.class, (addNodeMsg, data) -> processAddNode()));
+		when(State.Idle, matchEvent(AddNodesMessage.class, (addNodesMsg, data) -> processAddNodes(addNodesMsg)));
+		when(State.Idle, matchEvent(BootNodesMessage.class, (bootNodesMsg, data) -> startBoot(bootNodesMsg)));
+
+		when(State.BootRunning, matchEvent(NodeActor.BootNodeEndedMessage.class, NodesCount.class, (endBootMsg, nodesCount) -> processNodeBooted(nodesCount)));
 
 		when(State.Idle, matchEvent(StartRoundMessage.class, (startRoundMsg, data) -> startRound(startRoundMsg)));
 		when(State.RoundRunning, matchEvent(NodeActor.EndRoundMessage.class, NodesCount.class, (endRoundMsg, nodesCount) -> processEndRound(nodesCount)));
@@ -74,17 +81,40 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 	// Task processing state
 	private ActorRef taskSender;
 
-	// Used to assign node ids
-	private int nextNodeId = 0;
-
-	DataProcessor dataProcessor = new DataProcessor();
+	private final DataProcessor dataProcessor = new DataProcessor();
 	boolean[][] adjacencyMatrix;
 
-	private akka.actor.FSM.State<State, StateData> processAddNode() {
-		int nodeIndex = nextNodeId++;
-		ActorRef newNode = context().actorOf(Props.create(NodeActor.class), "" + nodeIndex);
-		sender().tell(new AddNodeEndedMessage(newNode, nodeIndex), self());
+	private akka.actor.FSM.State<State, StateData> processAddNodes(AddNodesMessage addMsg) {
+		NavigableMap<Integer, ActorRef> addedNodes = new TreeMap<Integer, ActorRef>();
+
+		for (int i = 0; i < addMsg.requiredNodes; i++) {
+			ActorRef newNode = context().actorOf(Props.create(NodeActor.class, addMsg.cacheSize, addMsg.shuffleLength), "" + i);
+			addedNodes.put(i, newNode);
+		}
+
+		sender().tell(new AddNodesEndedMessage(addedNodes), self());
 		return stay();
+	}
+
+	private akka.actor.FSM.State<State, StateData> startBoot(BootNodesMessage bootNodesMsg) {
+		taskSender = sender();
+
+		for (Entry<Integer, Integer> e : bootNodesMsg.bootNeighbors.entrySet()) {
+			ActorRef dest = toRef(e.getKey());
+			dest.tell(new NodeActor.BootNodeMessage(toRef(e.getValue())), self());
+		}
+		// TODO Auto-generated method stub
+		return goTo(State.BootRunning).using(new NodesCount(bootNodesMsg.bootNeighbors.size()));
+	}
+
+	private akka.actor.FSM.State<State, StateData> processNodeBooted(NodesCount count) {
+		count.increaseOne();
+
+		if (count.isCompleted()) {
+			taskSender.tell(new BootNodesEndedMessage(), self());
+			return goTo(State.Idle);
+		} else
+			return stay();
 	}
 
 	private akka.actor.FSM.State<State, StateData> startRound(StartRoundMessage startRoundMsg) {
@@ -138,18 +168,45 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 		return Integer.parseInt(sender.path().name());
 	}
 
-	public static class AddNodeMessage {
+	private ActorRef toRef(int index) {
+		return context().child(Integer.toString(index)).get();
 	}
 
-	public static class AddNodeEndedMessage {
+	public static class AddNodesMessage {
 
-		final ActorRef newNode;
-		final int nodeIndex;
+		final int requiredNodes;
+		final int cacheSize;
+		final int shuffleLength;
 
-		public AddNodeEndedMessage(ActorRef newNode, int nodeIndex) {
-			this.newNode = newNode;
-			this.nodeIndex = nodeIndex;
+		public AddNodesMessage(int requiredNodes, int cacheSize, int shuffleLength) {
+			this.requiredNodes = requiredNodes;
+			this.cacheSize = cacheSize;
+			this.shuffleLength = shuffleLength;
+
 		}
+
+	}
+
+	public static class AddNodesEndedMessage {
+
+		final NavigableMap<Integer, ActorRef> addedNodes;
+
+		public AddNodesEndedMessage(NavigableMap<Integer, ActorRef> addedNodes) {
+			this.addedNodes = addedNodes;
+		}
+
+	}
+
+	public static class BootNodesMessage {
+
+		final Map<Integer, Integer> bootNeighbors;
+
+		public BootNodesMessage(Map<Integer, Integer> bootNeighbors) {
+			this.bootNeighbors = bootNeighbors;
+		}
+	}
+
+	public static class BootNodesEndedMessage {
 
 	}
 
