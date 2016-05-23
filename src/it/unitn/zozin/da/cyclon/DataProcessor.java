@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Set;
 import java.util.TreeMap;
 
@@ -152,7 +153,33 @@ public class DataProcessor {
 	}
 
 	public static enum GraphProperty {
-		IN_DEGREE, PATH_LEN, CLUSTERING
+		IN_DEGREE {
+
+			@SuppressWarnings("unchecked")
+			@Override
+			String serializeData(Object inDegreeDistr, int round) {
+				StringBuilder b = new StringBuilder();
+				for (Entry<Integer, Integer> dist : ((Map<Integer, Integer>) inDegreeDistr).entrySet())
+					b.append(dist.getKey() + " " + dist.getValue() + "\n");
+				return b.toString();
+			}
+		},
+		PATH_LEN {
+
+			@Override
+			String serializeData(Object value, int round) {
+				return round + " " + value.toString() + "\n";
+			}
+		},
+		CLUSTERING {
+
+			@Override
+			String serializeData(Object value, int round) {
+				return round + " " + value.toString() + "\n";
+			}
+		};
+
+		abstract String serializeData(Object value, int round);
 	};
 
 }

@@ -111,7 +111,7 @@ class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationState
 	}
 
 	private akka.actor.FSM.State<State, SimulationStateData> startSimulation() {
-		System.out.println("[boot completed]");
+		System.out.println("[completed]");
 		return executeMeasure(new SimulationStateData(conf.ROUNDS + 1));
 	}
 

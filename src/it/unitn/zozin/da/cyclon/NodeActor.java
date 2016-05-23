@@ -42,7 +42,7 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 		startWith(State.Uninitialized, null);
 
 		// Initialize the node
-		when(State.Uninitialized, matchEvent(BootNodeMessage.class, (initMsg, data) -> processInitNode(initMsg)));
+		when(State.Uninitialized, matchEvent(BootNodeMessage.class, (initMsg, data) -> processBootNode(initMsg)));
 
 		// Start executing round (move to WaitingForReply state)
 		when(State.Idle, matchEvent(StartRoundMessage.class, (startRoundMsg, data) -> processStartRound()));
@@ -85,7 +85,7 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 			return sendCyclonRequest();
 	}
 
-	private akka.actor.FSM.State<State, StateData> processInitNode(BootNodeMessage message) {
+	private akka.actor.FSM.State<State, StateData> processBootNode(BootNodeMessage message) {
 		// Initialize cache with the boot initializer
 		cache.updateNeighbors(Collections.singletonList(new Neighbor(0, message.introducer)), false);
 
