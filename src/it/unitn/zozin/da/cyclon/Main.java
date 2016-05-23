@@ -18,7 +18,12 @@ public class Main {
 	static final Configuration config = new Configuration();
 
 	public static void main(String args[]) throws Exception {
-		config.load(new FileInputStream("simulation.cfg"));
+		if (args.length < 1) {
+			System.err.println("Expected config file as argument");
+			System.exit(1);
+		}
+
+		config.load(new FileInputStream(args[0]));
 
 		ActorSystem sys = ActorSystem.create();
 		ActorRef simulation = SimulationActor.newActor(sys);
