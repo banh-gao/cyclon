@@ -18,7 +18,6 @@ public class DataProcessor {
 		int aggTotalDistance = 0;
 
 		RoundData data = new RoundData();
-
 		for (int node = 0; node < graph.length; node++) {
 			if (params.contains(GraphProperty.PATH_LEN))
 				aggTotalDistance += calcNodePathSum(node, graph);
@@ -72,8 +71,8 @@ public class DataProcessor {
 			// Count the number of edges of the graph induced by the
 			// current node (edges between current node neighbors)
 			for (int n2 : neighbors) {
-				// Skip edges pointing to current node and to n1 itself
-				if (n2 == node || n2 == n1)
+				// Skip the edge pointing to inducer node
+				if (n2 == node)
 					continue;
 
 				if (graph[n1][n2])

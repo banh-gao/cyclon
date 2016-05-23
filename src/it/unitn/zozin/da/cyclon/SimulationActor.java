@@ -1,12 +1,5 @@
 package it.unitn.zozin.da.cyclon;
 
-import it.unitn.zozin.da.cyclon.DataProcessor.GraphProperty;
-import it.unitn.zozin.da.cyclon.DataProcessor.RoundData;
-import it.unitn.zozin.da.cyclon.GraphActor.AddNodesEndedMessage;
-import it.unitn.zozin.da.cyclon.GraphActor.BootNodesEndedMessage;
-import it.unitn.zozin.da.cyclon.NodeActor.EndRoundMessage;
-import it.unitn.zozin.da.cyclon.NodeActor.StartRoundMessage;
-import it.unitn.zozin.da.cyclon.SimulationActor.SimulationStateData;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.util.HashMap;
@@ -19,10 +12,18 @@ import java.util.Properties;
 import java.util.Random;
 import java.util.Set;
 import java.util.function.BiFunction;
+import java.util.logging.Level;
 import akka.actor.AbstractFSM;
 import akka.actor.ActorRef;
 import akka.actor.ActorSystem;
 import akka.actor.Props;
+import it.unitn.zozin.da.cyclon.DataProcessor.GraphProperty;
+import it.unitn.zozin.da.cyclon.DataProcessor.RoundData;
+import it.unitn.zozin.da.cyclon.GraphActor.AddNodesEndedMessage;
+import it.unitn.zozin.da.cyclon.GraphActor.BootNodesEndedMessage;
+import it.unitn.zozin.da.cyclon.NodeActor.EndRoundMessage;
+import it.unitn.zozin.da.cyclon.NodeActor.StartRoundMessage;
+import it.unitn.zozin.da.cyclon.SimulationActor.SimulationStateData;
 
 class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationStateData> {
 
@@ -98,7 +99,7 @@ class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationState
 	}
 
 	private akka.actor.FSM.State<State, SimulationStateData> executeNodesBoot(NavigableSet<Integer> addedNodes) {
-		System.out.print("Executing [BOOT]... ");
+		Main.LOGGER.log(Level.INFO, "Executing [BOOT]... ");
 		Map<Integer, Integer> introducers = new HashMap<Integer, Integer>();
 		for (int n : addedNodes) {
 			int introducer = conf.BOOT_TOPOLOGY.topologyFunc.apply(addedNodes, n);
@@ -111,7 +112,7 @@ class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationState
 	}
 
 	private akka.actor.FSM.State<State, SimulationStateData> startSimulation() {
-		System.out.println("[completed]");
+		Main.LOGGER.log(Level.INFO, "[completed]\n");
 		return executeMeasure(new SimulationStateData(conf.ROUNDS + 1));
 	}
 
@@ -130,16 +131,16 @@ class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationState
 		}
 
 		if (simState.getRound() == BOOT_ROUND)
-			System.out.print("Measuring [BOOT]... ");
+			Main.LOGGER.log(Level.INFO, "Measuring [BOOT]... ");
 		else
-			System.out.print("Measuring round " + simState.getRound() + "... ");
+			Main.LOGGER.log(Level.INFO, "Measuring round " + simState.getRound() + "... ");
 
 		GRAPH.tell(new GraphActor.StartMeasureMessage(measureParams), self());
 		return goTo(State.MeasureRunning).using(simState);
 	}
 
 	private akka.actor.FSM.State<State, SimulationStateData> processMeasure(RoundData roundMeasureMsg, SimulationStateData simState) {
-		System.out.println("[completed] -> " + roundMeasureMsg);
+		Main.LOGGER.log(Level.INFO, "[completed] -> " + roundMeasureMsg + "\n");
 		return controlSimulationRoundEnd(simState, roundMeasureMsg);
 	}
 
@@ -157,16 +158,16 @@ class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationState
 
 	private akka.actor.FSM.State<State, SimulationStateData> executeProtocolRound(SimulationStateData simState) {
 		if (simState.getRound() == BOOT_ROUND)
-			System.out.print("Executing [BOOT]... ");
+			Main.LOGGER.log(Level.INFO, "Executing [BOOT]... ");
 		else
-			System.out.print("Executing round " + (simState.getRound()) + "... ");
+			Main.LOGGER.log(Level.INFO, "Executing round " + (simState.getRound()) + "... ");
 
 		GRAPH.tell(new StartRoundMessage(), self());
 		return goTo(State.RoundRunning).using(simState);
 	}
 
 	private akka.actor.FSM.State<State, SimulationStateData> processCyclonRoundEnded(EndRoundMessage roundMsg, SimulationStateData simState) {
-		System.out.println("[completed]");
+		Main.LOGGER.log(Level.INFO, "[completed]\n");
 		return executeMeasure(simState);
 	}
 
@@ -179,9 +180,7 @@ class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationState
 		enum Topology {
 			CHAIN((nodes, i) -> {
 				return (nodes.higher(i) != null) ? nodes.higher(i) : nodes.first();
-			}),
-			STAR((nodes, i) -> nodes.first()),
-			RANDOM((nodes, i) -> nodes.ceiling(rand.nextInt(nodes.size())));
+			}), STAR((nodes, i) -> nodes.first()), RANDOM((nodes, i) -> nodes.ceiling(rand.nextInt(nodes.size())));
 
 			private final BiFunction<NavigableSet<Integer>, Integer, Integer> topologyFunc;
 

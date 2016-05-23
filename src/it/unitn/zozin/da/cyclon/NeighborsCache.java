@@ -54,8 +54,6 @@ public class NeighborsCache {
 			}
 		}
 
-		assert (0 <= oldestIndex && oldestIndex < cache.size());
-
 		return oldestIndex;
 	}
 
@@ -103,16 +101,11 @@ public class NeighborsCache {
 					replaceableEntriesIter.remove();
 				}
 
-				// INVARIANCE: The replaceable entry has always to be present in
-				// current neighbors (remove returns true if present)
-				assert (cache.remove(newEntryIndex) != null) : newEntryIndex + " not in cache: " + cache;
+				cache.remove(newEntryIndex);
 			}
 
 			cache.add(newEntryIndex, newNeighbor);
 		}
-
-		// INVARIANCE: cache size never exceeds maximum size
-		assert (cache.size() <= MAX_SIZE);
 	}
 
 	@Override
