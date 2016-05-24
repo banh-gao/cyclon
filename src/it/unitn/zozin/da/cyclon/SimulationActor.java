@@ -120,7 +120,7 @@ class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationState
 
 		Set<GraphProperty> measureParams;
 
-		if (simState.getRound() == BOOT_ROUND || simState.isLast())
+		if (simState.isLast())
 			measureParams = conf.FINAL_MEASURE;
 		else
 			measureParams = conf.ROUND_MEASURE;
