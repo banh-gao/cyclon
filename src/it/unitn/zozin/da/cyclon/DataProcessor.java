@@ -24,7 +24,7 @@ public class DataProcessor {
 			if (params.contains(GraphProperty.CLUSTERING))
 				aggClustering += calcLocalClustering(node, graph);
 			if (params.contains(GraphProperty.IN_DEGREE))
-				calcInDegree(node, graph, inDegreeDistr);
+				inDegreeDistr.compute(calcInDegree(node, graph), (k, v) -> (v == null) ? 1 : v + 1);
 		}
 
 		if (params.contains(GraphProperty.PATH_LEN)) {
@@ -43,13 +43,14 @@ public class DataProcessor {
 
 	}
 
-	private void calcInDegree(int node, boolean[][] graph, Map<Integer, Integer> inDegreeDistr) {
+	private int calcInDegree(int node, boolean[][] graph) {
 		int nodeInDegree = 0;
 		// Count nodes pointing to this node
 		for (int neighbor = 0; neighbor < graph.length; neighbor++)
 			if (graph[neighbor][node])
 				nodeInDegree++;
-		inDegreeDistr.compute(nodeInDegree, (k, v) -> (v == null) ? 1 : v + 1);
+
+		return nodeInDegree;
 	}
 
 	private float calcLocalClustering(int node, boolean[][] graph) {

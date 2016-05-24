@@ -1,12 +1,12 @@
 package it.unitn.zozin.da.cyclon;
 
-import it.unitn.zozin.da.cyclon.NeighborsCache.Neighbor;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 import akka.actor.AbstractFSM;
 import akka.actor.ActorRef;
+import it.unitn.zozin.da.cyclon.NeighborsCache.Neighbor;
 
 public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData> {
 
@@ -50,12 +50,12 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 		// Process cyclon answer for pending request and end the current round
 		when(State.WaitingForReply, matchEvent(CyclonNodeAnswer.class, AnswerCount.class, (answerMsg, ansCount) -> processCyclonAnswer(answerMsg, ansCount)));
 
-		// Process cyclon join and node exchange requests
+		// Process cyclon join and node list request
 		// (no state transition)
 		when(State.Idle, matchEvent(CyclonJoin.class, (joinMsg, data) -> processJoinRequest(joinMsg)));
-		when(State.Idle, matchEvent(CyclonNodeRequest.class, (nodeListMsg, data) -> processExchangeRequest(nodeListMsg)));
+		when(State.Idle, matchEvent(CyclonNodeRequest.class, (nodeListMsg, data) -> processCyclonRequest(nodeListMsg)));
 		when(State.WaitingForReply, matchEvent(CyclonJoin.class, (joinMsg, data) -> processJoinRequest(joinMsg)));
-		when(State.WaitingForReply, matchEvent(CyclonNodeRequest.class, (reqMsg, data) -> processExchangeRequest(reqMsg)));
+		when(State.WaitingForReply, matchEvent(CyclonNodeRequest.class, (reqMsg, data) -> processCyclonRequest(reqMsg)));
 
 		// Process measure requests (no state transition)
 		when(State.Idle, matchEvent(StartMeasureMessage.class, (startMeasureMsg, data) -> processMeasureRequest()));
@@ -126,10 +126,8 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 	}
 
 	private void sendCyclonJoinAnswer() {
-		List<Neighbor> selected = cache.selectRandomNeighbors(shuffleLength, sender());
-
+		List<Neighbor> selected = cache.selectRandomNeighbors(1, sender());
 		cache.updateNeighbors(Collections.singletonList(new Neighbor(0, sender())), false);
-
 		sender().tell(new CyclonNodeAnswer(selected), self());
 	}
 
@@ -149,9 +147,22 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 		return goTo(State.WaitingForReply).using(new AnswerCount(1));
 	}
 
+	private akka.actor.FSM.State<State, StateData> processCyclonRequest(CyclonNodeRequest req) {
+		// Remove itself (if present)
+		req.nodes.remove(selfAddress);
+
+		List<Neighbor> ansNodes = cache.selectRandomNeighbors(shuffleLength, sender());
+		sender().tell(new CyclonNodeAnswer(ansNodes), self());
+
+		cache.updateNeighbors(req.nodes, false);
+
+		return stay();
+	}
+
 	private akka.actor.FSM.State<State, StateData> processCyclonAnswer(CyclonNodeAnswer answer, AnswerCount ansCount) {
 		// Remove itself (if present)
 		answer.nodes.remove(selfAddress);
+
 		ansCount.increaseOne();
 
 		// Save received nodes in cache
@@ -169,18 +180,6 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 
 	private void sendRoundCompletedStatus() {
 		context().parent().tell(new EndRoundMessage(), self());
-	}
-
-	private akka.actor.FSM.State<State, StateData> processExchangeRequest(CyclonNodeRequest req) {
-		// Remove itself (if present)
-		req.nodes.remove(selfAddress);
-
-		List<Neighbor> ansNodes = cache.selectRandomNeighbors(shuffleLength, sender());
-		sender().tell(new CyclonNodeAnswer(ansNodes), self());
-
-		cache.updateNeighbors(req.nodes, false);
-
-		return stay();
 	}
 
 	private akka.actor.FSM.State<State, StateData> processMeasureRequest() {
@@ -217,11 +216,16 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 		final List<Neighbor> nodes;
 
 		public CyclonNodeList(List<Neighbor> nodes) {
-			// FIXME: Clone elements to avoid object reference passing in local
+			// NOTE: Clone elements to avoid object reference passing in local
 			// executions
 			this.nodes = new ArrayList<NeighborsCache.Neighbor>();
 			for (Neighbor n : nodes)
 				this.nodes.add(n.clone());
+		}
+
+		@Override
+		public String toString() {
+			return "CyclonNodeList [nodes=" + nodes + "]";
 		}
 	}
 

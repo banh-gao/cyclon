@@ -1,6 +1,9 @@
 package it.unitn.zozin.da.cyclon;
 
 import java.io.FileInputStream;
+import java.io.PrintWriter;
+import java.util.Date;
+import java.util.Map.Entry;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
@@ -10,6 +13,8 @@ import akka.actor.ActorSystem;
 import akka.actor.PoisonPill;
 import akka.pattern.PatternsCS;
 import akka.util.Timeout;
+import it.unitn.zozin.da.cyclon.DataProcessor.GraphProperty;
+import it.unitn.zozin.da.cyclon.DataProcessor.RoundData;
 import it.unitn.zozin.da.cyclon.SimulationActor.Configuration;
 import it.unitn.zozin.da.cyclon.SimulationActor.SimulationDataMessage;
 import scala.concurrent.duration.FiniteDuration;
@@ -18,6 +23,7 @@ public class Main {
 
 	static final Timeout SIM_MAX_TIME = Timeout.apply(FiniteDuration.create(60, TimeUnit.MINUTES));
 	static final Configuration config = new Configuration();
+	static PrintWriter out;
 
 	public static final Logger LOGGER = Logger.getGlobal();
 
@@ -31,6 +37,8 @@ public class Main {
 
 		System.setProperty("java.util.logging.SimpleFormatter.format", "%5$s%6$s");
 
+		out = new PrintWriter("OUTPUT.dat");
+
 		if (args.length > 1 && "debug".equalsIgnoreCase(args[1]))
 			Main.LOGGER.setLevel(Level.ALL);
 		else
@@ -42,8 +50,25 @@ public class Main {
 		CompletionStage<Object> res = PatternsCS.ask(simulation, config, SIM_MAX_TIME);
 		res.thenRun(() -> sys.guardian().tell(PoisonPill.getInstance(), null));
 
-		DataLogger l = new DataLogger(config);
+		res.thenAcceptAsync((r) -> writeData((SimulationDataMessage) r));
+	}
 
-		res.thenAcceptAsync((r) -> l.writeData((SimulationDataMessage) r));
+	public static void writeData(SimulationDataMessage data) {
+		out.write(String.format("#Simulation completed on %s (nodes=%d rounds=%d cache=%d topology=%s)\n", new Date().toString(), config.NODES, config.ROUNDS, config.CYCLON_CACHE_SIZE, config.BOOT_TOPOLOGY));
+		for (Entry<Integer, RoundData> e : data.simData.entrySet()) {
+			int round = e.getKey();
+
+			// Ignore boot round measure
+			if (round == 0)
+				continue;
+
+			RoundData roundData = e.getValue();
+
+			// Write all properties for current round
+			for (GraphProperty prop : roundData.roundValues.keySet()) {
+				out.write(prop.serializeData(roundData.roundValues.get(prop), round));
+			}
+		}
+		out.close();
 	}
 }
