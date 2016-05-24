@@ -4,6 +4,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.NavigableSet;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import akka.actor.AbstractFSM;
 import akka.actor.ActorRef;
@@ -12,13 +13,15 @@ import it.unitn.zozin.da.cyclon.DataProcessor.GraphProperty;
 import it.unitn.zozin.da.cyclon.DataProcessor.RoundData;
 import it.unitn.zozin.da.cyclon.NodeActor.EndRoundMessage;
 import it.unitn.zozin.da.cyclon.NodeActor.MeasureDataMessage;
+import it.unitn.zozin.da.cyclon.NodeActor.NodeCalcResult;
+import it.unitn.zozin.da.cyclon.NodeActor.NodeCalcTask;
 import it.unitn.zozin.da.cyclon.NodeActor.StartRoundMessage;
 import scala.collection.JavaConversions;
 
 public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateData> {
 
 	enum State {
-		Idle, BootRunning, RoundRunning, MeasureRunning
+		Idle, BootRunning, RoundRunning, MeasureRunning, CalcRunning
 	}
 
 	interface StateData {
@@ -63,6 +66,33 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 		}
 	}
 
+	class CalcStateData implements StateData {
+
+		final public int total;
+		final public Set<GraphProperty> params;
+
+		public Map<Integer, Integer> inDegreeDistr;
+		public float aggClustering;
+		public int aggTotalDistance;
+
+		public int current = 0;
+
+		public CalcStateData(int total, Set<GraphProperty> params) {
+			this.total = total;
+			this.params = params;
+			this.inDegreeDistr = new TreeMap<Integer, Integer>();
+		}
+
+		public boolean isCompleted() {
+			return current == total;
+		}
+
+		public void increaseOne() {
+			current++;
+		}
+
+	}
+
 	{
 		startWith(State.Idle, null);
 
@@ -76,12 +106,13 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 
 		when(State.Idle, matchEvent(StartMeasureMessage.class, (startMeasureMsg, data) -> startMeasure(startMeasureMsg)));
 		when(State.MeasureRunning, matchEvent(NodeActor.MeasureDataMessage.class, MeasureStateData.class, (measureDataMsg, nodesCount) -> processNodeMeasure(measureDataMsg, nodesCount)));
+
+		when(State.CalcRunning, matchEvent(NodeActor.NodeCalcResult.class, CalcStateData.class, (calcDataMsg, calcState) -> processCalcResult(calcDataMsg, calcState)));
 	}
 
 	// Task processing state
 	private ActorRef taskSender;
 
-	private final DataProcessor dataProcessor = new DataProcessor();
 	boolean[][] adjacencyMatrix;
 
 	private akka.actor.FSM.State<State, StateData> processAddNodes(AddNodesMessage addMsg) {
@@ -157,11 +188,52 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 		}
 
 		if (measureStateData.isCompleted()) {
-			RoundData processedRound = dataProcessor.processRoundSample(measureStateData.params, adjacencyMatrix, context().dispatcher());
+			return executeNodeCalculation(measureStateData.params);
+		} else {
+			return stay();
+		}
+	}
+
+	private akka.actor.FSM.State<State, StateData> executeNodeCalculation(Set<GraphProperty> params) {
+
+		for (ActorRef child : JavaConversions.asJavaIterable(context().children())) {
+			child.tell(new NodeCalcTask(adjacencyMatrix, params, toIndex(child)), self());
+		}
+
+		return goTo(State.CalcRunning).using(new CalcStateData(adjacencyMatrix.length, params));
+	}
+
+	private akka.actor.FSM.State<State, StateData> processCalcResult(NodeCalcResult result, CalcStateData calcState) {
+		if (calcState.params.contains(GraphProperty.PATH_LEN))
+			calcState.aggTotalDistance += result.pathsSum;
+		if (calcState.params.contains(GraphProperty.CLUSTERING))
+			calcState.aggClustering += result.localClustering;
+		if (calcState.params.contains(GraphProperty.IN_DEGREE))
+			calcState.inDegreeDistr.compute(result.inDegree, (k, v) -> (v == null) ? 1 : v + 1);
+
+		calcState.increaseOne();
+
+		if (calcState.isCompleted()) {
+			RoundData processedRound = computeFinalData(calcState);
 			taskSender.tell(processedRound, self());
 			return goTo(State.Idle);
+		} else {
+			return stay();
 		}
-		return stay();
+	}
+
+	private RoundData computeFinalData(CalcStateData calcState) {
+		RoundData data = new RoundData();
+		if (calcState.params.contains(GraphProperty.PATH_LEN))
+			data.addData(GraphProperty.PATH_LEN, calcState.aggTotalDistance / (float) (calcState.total * (calcState.total - 1)));
+
+		if (calcState.params.contains(GraphProperty.CLUSTERING))
+			data.addData(GraphProperty.CLUSTERING, calcState.aggClustering / calcState.total);
+
+		if (calcState.params.contains(GraphProperty.IN_DEGREE))
+			data.addData(GraphProperty.IN_DEGREE, calcState.inDegreeDistr);
+
+		return data;
 	}
 
 	private int toIndex(ActorRef sender) {

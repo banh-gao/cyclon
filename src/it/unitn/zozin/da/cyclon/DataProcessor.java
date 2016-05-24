@@ -5,52 +5,29 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
-import scala.concurrent.ExecutionContextExecutor;
+import it.unitn.zozin.da.cyclon.NodeActor.NodeCalcResult;
+import it.unitn.zozin.da.cyclon.NodeActor.NodeCalcTask;
 
-public class DataProcessor {
+class DataProcessor {
 
 	private static final int DIST_UNREACHABLE = Integer.MAX_VALUE;
 
-	public RoundData processRoundSample(Set<GraphProperty> params, boolean[][] graph, ExecutionContextExecutor executionContextExecutor) {
+	public static NodeCalcResult calcNode(NodeCalcTask task) {
+		int pathsSum = 0;
+		float localClustering = 0;
+		int inDegree = 0;
 
-		RoundCalcStatus calcStatus = new RoundCalcStatus();
-		RoundData data = new RoundData();
-		for (int node = 0; node < graph.length; node++) {
-			executionContextExecutor.execute(calcNode(params));
-		}
+		if (task.params.contains(GraphProperty.PATH_LEN))
+			pathsSum = calcNodePathSum(task.node, task.graph);
+		if (task.params.contains(GraphProperty.CLUSTERING))
+			localClustering = calcLocalClustering(task.node, task.graph);
+		if (task.params.contains(GraphProperty.IN_DEGREE))
+			inDegree = calcInDegree(task.node, task.graph);
 
-		// TODO: Wait for completion
-
-		if (params.contains(GraphProperty.PATH_LEN)) {
-			float apl = calcStatus.aggTotalDistance.get() / (float) (graph.length * (graph.length - 1));
-			data.addData(GraphProperty.PATH_LEN, apl);
-		}
-
-		if (params.contains(GraphProperty.CLUSTERING)) {
-			float clusteringCoeff = calcStatus.aggClustering.get() / graph.length;
-			data.addData(GraphProperty.CLUSTERING, clusteringCoeff);
-		}
-		if (params.contains(GraphProperty.IN_DEGREE))
-			data.addData(GraphProperty.IN_DEGREE, calcStatus.inDegreeDistr);
-
-		return data;
-
+		return new NodeCalcResult(pathsSum, localClustering, inDegree);
 	}
 
-	private void calcNode(Set<GraphProperty> params) {
-		if (params.contains(GraphProperty.PATH_LEN))
-			aggTotalDistance += calcNodePathSum(node, graph);
-		if (params.contains(GraphProperty.CLUSTERING))
-			aggClustering += calcLocalClustering(node, graph);
-		if (params.contains(GraphProperty.IN_DEGREE))
-			inDegreeDistr.compute(calcInDegree(node, graph), (k, v) -> (v == null) ? 1 : v + 1);
-	}
-
-	private int calcInDegree(int node, boolean[][] graph) {
+	private static int calcInDegree(int node, boolean[][] graph) {
 		int nodeInDegree = 0;
 		// Count nodes pointing to this node
 		for (int neighbor = 0; neighbor < graph.length; neighbor++)
@@ -60,7 +37,7 @@ public class DataProcessor {
 		return nodeInDegree;
 	}
 
-	private float calcLocalClustering(int node, boolean[][] graph) {
+	private static float calcLocalClustering(int node, boolean[][] graph) {
 		List<Integer> neighbors = new ArrayList<Integer>();
 
 		// Get neighbors of the current node
@@ -92,7 +69,7 @@ public class DataProcessor {
 		return local;
 	}
 
-	private int calcNodePathSum(int node, boolean[][] graph) {
+	private static int calcNodePathSum(int node, boolean[][] graph) {
 		int nodeDist = 0;
 		int[] dist = shortestPath(node, graph);
 		for (int n2 = 0; n2 < dist.length; n2++) {
@@ -188,11 +165,4 @@ public class DataProcessor {
 
 		abstract String serializeData(Object value, int round);
 	};
-
-	private class RoundCalcStatus {
-
-		Map<Integer, Integer> inDegreeDistr = new ConcurrentHashMap<Integer, Integer>();
-		AtomicLong aggClustering = new AtomicLong(0);
-		AtomicInteger aggTotalDistance = new AtomicInteger(0);
-	}
 }

@@ -3,9 +3,11 @@ package it.unitn.zozin.da.cyclon;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 import akka.actor.AbstractFSM;
 import akka.actor.ActorRef;
+import it.unitn.zozin.da.cyclon.DataProcessor.GraphProperty;
 import it.unitn.zozin.da.cyclon.NeighborsCache.Neighbor;
 
 public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData> {
@@ -57,8 +59,9 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 		when(State.WaitingForReply, matchEvent(CyclonJoin.class, (joinMsg, data) -> processJoinRequest(joinMsg)));
 		when(State.WaitingForReply, matchEvent(CyclonNodeRequest.class, (reqMsg, data) -> processCyclonRequest(reqMsg)));
 
-		// Process measure requests (no state transition)
+		// Process measure and calc requests (no state transition)
 		when(State.Idle, matchEvent(StartMeasureMessage.class, (startMeasureMsg, data) -> processMeasureRequest()));
+		when(State.Idle, matchEvent(NodeCalcTask.class, (startCalcMsg, data) -> processCalcRequest(startCalcMsg)));
 	}
 
 	private Neighbor selfAddress;
@@ -190,6 +193,11 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 		return stay();
 	}
 
+	private akka.actor.FSM.State<State, StateData> processCalcRequest(NodeCalcTask message) {
+		sender().tell(DataProcessor.calcNode(message), self());
+		return stay();
+	}
+
 	public static class BootNodeMessage {
 
 		final ActorRef introducer;
@@ -272,6 +280,33 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 
 		public MeasureDataMessage(List<ActorRef> neighbors) {
 			this.neighbors = new ArrayList<ActorRef>(neighbors);
+		}
+	}
+
+	public static class NodeCalcTask {
+
+		final int node;
+		final boolean[][] graph;
+		final Set<GraphProperty> params;
+
+		public NodeCalcTask(boolean[][] graph, Set<GraphProperty> params, int node) {
+			this.graph = graph;
+			this.params = params;
+			this.node = node;
+		}
+
+	}
+
+	public static class NodeCalcResult {
+
+		final int pathsSum;
+		final float localClustering;
+		final int inDegree;
+
+		public NodeCalcResult(int pathsSum, float localClustering, int inDegree) {
+			this.pathsSum = pathsSum;
+			this.localClustering = localClustering;
+			this.inDegree = inDegree;
 		}
 	}
 }
