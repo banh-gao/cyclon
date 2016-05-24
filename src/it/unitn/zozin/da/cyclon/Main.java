@@ -57,11 +57,6 @@ public class Main {
 		out.write(String.format("#Simulation completed on %s (nodes=%d rounds=%d cache=%d topology=%s)\n", new Date().toString(), config.NODES, config.ROUNDS, config.CYCLON_CACHE_SIZE, config.BOOT_TOPOLOGY));
 		for (Entry<Integer, RoundData> e : data.simData.entrySet()) {
 			int round = e.getKey();
-
-			// Ignore boot round measure
-			if (round == 0)
-				continue;
-
 			RoundData roundData = e.getValue();
 
 			// Write all properties for current round
