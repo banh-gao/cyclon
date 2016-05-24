@@ -1,19 +1,19 @@
 package it.unitn.zozin.da.cyclon;
 
-import it.unitn.zozin.da.cyclon.DataProcessor.GraphProperty;
-import it.unitn.zozin.da.cyclon.DataProcessor.RoundData;
-import it.unitn.zozin.da.cyclon.NodeActor.EndRoundMessage;
-import it.unitn.zozin.da.cyclon.NodeActor.MeasureDataMessage;
-import it.unitn.zozin.da.cyclon.NodeActor.StartRoundMessage;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.NavigableSet;
 import java.util.Set;
 import java.util.TreeSet;
-import scala.collection.JavaConversions;
 import akka.actor.AbstractFSM;
 import akka.actor.ActorRef;
 import akka.actor.Props;
+import it.unitn.zozin.da.cyclon.DataProcessor.GraphProperty;
+import it.unitn.zozin.da.cyclon.DataProcessor.RoundData;
+import it.unitn.zozin.da.cyclon.NodeActor.EndRoundMessage;
+import it.unitn.zozin.da.cyclon.NodeActor.MeasureDataMessage;
+import it.unitn.zozin.da.cyclon.NodeActor.StartRoundMessage;
+import scala.collection.JavaConversions;
 
 public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateData> {
 
@@ -157,7 +157,7 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 		}
 
 		if (measureStateData.isCompleted()) {
-			RoundData processedRound = dataProcessor.processRoundSample(measureStateData.params, adjacencyMatrix);
+			RoundData processedRound = dataProcessor.processRoundSample(measureStateData.params, adjacencyMatrix, context().dispatcher());
 			taskSender.tell(processedRound, self());
 			return goTo(State.Idle);
 		}

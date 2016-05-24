@@ -6,41 +6,48 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
-import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import scala.concurrent.ExecutionContextExecutor;
 
 public class DataProcessor {
 
 	private static final int DIST_UNREACHABLE = Integer.MAX_VALUE;
 
-	public RoundData processRoundSample(Set<GraphProperty> params, boolean[][] graph) {
-		Map<Integer, Integer> inDegreeDistr = new TreeMap<Integer, Integer>();
-		float aggClustering = 0;
-		int aggTotalDistance = 0;
+	public RoundData processRoundSample(Set<GraphProperty> params, boolean[][] graph, ExecutionContextExecutor executionContextExecutor) {
 
+		RoundCalcStatus calcStatus = new RoundCalcStatus();
 		RoundData data = new RoundData();
 		for (int node = 0; node < graph.length; node++) {
-			if (params.contains(GraphProperty.PATH_LEN))
-				aggTotalDistance += calcNodePathSum(node, graph);
-			if (params.contains(GraphProperty.CLUSTERING))
-				aggClustering += calcLocalClustering(node, graph);
-			if (params.contains(GraphProperty.IN_DEGREE))
-				inDegreeDistr.compute(calcInDegree(node, graph), (k, v) -> (v == null) ? 1 : v + 1);
+			executionContextExecutor.execute(calcNode(params));
 		}
 
+		// TODO: Wait for completion
+
 		if (params.contains(GraphProperty.PATH_LEN)) {
-			float apl = aggTotalDistance / (float) (graph.length * (graph.length - 1));
+			float apl = calcStatus.aggTotalDistance.get() / (float) (graph.length * (graph.length - 1));
 			data.addData(GraphProperty.PATH_LEN, apl);
 		}
 
 		if (params.contains(GraphProperty.CLUSTERING)) {
-			float clusteringCoeff = aggClustering / graph.length;
+			float clusteringCoeff = calcStatus.aggClustering.get() / graph.length;
 			data.addData(GraphProperty.CLUSTERING, clusteringCoeff);
 		}
 		if (params.contains(GraphProperty.IN_DEGREE))
-			data.addData(GraphProperty.IN_DEGREE, inDegreeDistr);
+			data.addData(GraphProperty.IN_DEGREE, calcStatus.inDegreeDistr);
 
 		return data;
 
+	}
+
+	private void calcNode(Set<GraphProperty> params) {
+		if (params.contains(GraphProperty.PATH_LEN))
+			aggTotalDistance += calcNodePathSum(node, graph);
+		if (params.contains(GraphProperty.CLUSTERING))
+			aggClustering += calcLocalClustering(node, graph);
+		if (params.contains(GraphProperty.IN_DEGREE))
+			inDegreeDistr.compute(calcInDegree(node, graph), (k, v) -> (v == null) ? 1 : v + 1);
 	}
 
 	private int calcInDegree(int node, boolean[][] graph) {
@@ -182,4 +189,10 @@ public class DataProcessor {
 		abstract String serializeData(Object value, int round);
 	};
 
+	private class RoundCalcStatus {
+
+		Map<Integer, Integer> inDegreeDistr = new ConcurrentHashMap<Integer, Integer>();
+		AtomicLong aggClustering = new AtomicLong(0);
+		AtomicInteger aggTotalDistance = new AtomicInteger(0);
+	}
 }
