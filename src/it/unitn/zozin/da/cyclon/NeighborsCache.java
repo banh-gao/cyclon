@@ -14,7 +14,6 @@ import akka.actor.ActorRef;
 
 public class NeighborsCache {
 
-	public static final long SEED = 1234l;
 	private final int MAX_SIZE;
 
 	private final List<Neighbor> cache;
@@ -24,9 +23,8 @@ public class NeighborsCache {
 
 	public NeighborsCache(int maxSize) {
 		selectedEntries = new HashSet<Integer>();
-		rand = new Random(SEED);
 		this.MAX_SIZE = maxSize;
-
+		this.rand = new Random();
 		cache = new ArrayList<Neighbor>();
 	}
 
