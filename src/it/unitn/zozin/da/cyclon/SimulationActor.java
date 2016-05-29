@@ -3,24 +3,21 @@ package it.unitn.zozin.da.cyclon;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableSet;
 import java.util.Properties;
 import java.util.Random;
-import java.util.Set;
 import java.util.function.BiFunction;
 import java.util.logging.Level;
 import akka.actor.AbstractFSM;
 import akka.actor.ActorRef;
 import akka.actor.ActorSystem;
 import akka.actor.Props;
-import it.unitn.zozin.da.cyclon.DataProcessor.GraphProperty;
-import it.unitn.zozin.da.cyclon.DataProcessor.RoundData;
 import it.unitn.zozin.da.cyclon.GraphActor.AddNodesEndedMessage;
 import it.unitn.zozin.da.cyclon.GraphActor.BootNodesEndedMessage;
+import it.unitn.zozin.da.cyclon.GraphActor.RoundData;
 import it.unitn.zozin.da.cyclon.NodeActor.EndRoundMessage;
 import it.unitn.zozin.da.cyclon.NodeActor.StartRoundMessage;
 import it.unitn.zozin.da.cyclon.SimulationActor.SimulationStateData;
@@ -117,16 +114,9 @@ class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationState
 	}
 
 	private akka.actor.FSM.State<State, SimulationStateData> executeMeasure(SimulationStateData simState) {
-
-		Set<GraphProperty> measureParams;
-
-		if (simState.isLast())
-			measureParams = conf.FINAL_MEASURE;
-		else
-			measureParams = conf.ROUND_MEASURE;
-
-		// If there is nothing to measure skip measuring
-		if (measureParams.isEmpty()) {
+		// If the measure has to be taken only at the end, skip if this is not
+		// the last round
+		if (conf.FINAL_MEASURE_MODE && !simState.isLast()) {
 			return controlSimulationRoundEnd(simState, RoundData.EMPTY_DATA);
 		}
 
@@ -135,7 +125,7 @@ class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationState
 		else
 			Main.LOGGER.log(Level.INFO, "Measuring round " + simState.getRound() + "... ");
 
-		GRAPH.tell(new GraphActor.StartMeasureMessage(measureParams), self());
+		GRAPH.tell(new GraphActor.StartMeasureMessage(conf.MEASURE), self());
 		return goTo(State.MeasureRunning).using(simState);
 	}
 
@@ -198,8 +188,8 @@ class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationState
 		int ROUNDS;
 		int CYCLON_CACHE_SIZE;
 		int CYCLON_SHUFFLE_LENGTH;
-		Set<GraphProperty> ROUND_MEASURE;
-		Set<GraphProperty> FINAL_MEASURE;
+		GraphProperty MEASURE;
+		boolean FINAL_MEASURE_MODE;
 
 		public void load(FileInputStream inStream) throws IOException {
 			Properties props = new Properties();
@@ -211,15 +201,9 @@ class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationState
 			CYCLON_CACHE_SIZE = Integer.parseInt(props.getProperty("cyclonCache"));
 			CYCLON_SHUFFLE_LENGTH = Integer.parseInt(props.getProperty("cyclonShuffle"));
 
-			ROUND_MEASURE = new HashSet<DataProcessor.GraphProperty>();
-			if (!props.getProperty("roundMeasure", "").isEmpty())
-				for (String m : props.getProperty("roundMeasure", "").split(","))
-					ROUND_MEASURE.add(GraphProperty.valueOf(m.trim().toUpperCase()));
+			MEASURE = GraphProperty.valueOf(props.getProperty("measureType").trim().toUpperCase());
 
-			FINAL_MEASURE = new HashSet<DataProcessor.GraphProperty>();
-			if (!props.getProperty("finalMeasure", "").isEmpty())
-				for (String m : props.getProperty("finalMeasure", "").split(","))
-					FINAL_MEASURE.add(GraphProperty.valueOf(m.trim().toUpperCase()));
+			FINAL_MEASURE_MODE = props.getProperty("measureMode", "final").equalsIgnoreCase("final");
 		}
 	}
 

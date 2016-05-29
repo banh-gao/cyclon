@@ -3,11 +3,9 @@ package it.unitn.zozin.da.cyclon;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Set;
 import java.util.stream.Collectors;
 import akka.actor.AbstractFSM;
 import akka.actor.ActorRef;
-import it.unitn.zozin.da.cyclon.DataProcessor.GraphProperty;
 import it.unitn.zozin.da.cyclon.NeighborsCache.Neighbor;
 import it.unitn.zozin.da.cyclon.NodeActor.ReplyStateData;
 
@@ -222,7 +220,7 @@ public class NodeActor extends AbstractFSM<NodeActor.State, ReplyStateData> {
 	}
 
 	private akka.actor.FSM.State<State, ReplyStateData> processCalcRequest(NodeCalcTask message) {
-		sender().tell(DataProcessor.calcNode(message), self());
+		sender().tell(new NodeCalcResult(message.calculate()), self());
 		return stay();
 	}
 
@@ -313,28 +311,27 @@ public class NodeActor extends AbstractFSM<NodeActor.State, ReplyStateData> {
 
 	public static class NodeCalcTask {
 
-		final int node;
-		final boolean[][] graph;
-		final Set<GraphProperty> params;
+		private final int node;
+		private final boolean[][] graph;
+		private final GraphProperty param;
 
-		public NodeCalcTask(boolean[][] graph, Set<GraphProperty> params, int node) {
+		public NodeCalcTask(boolean[][] graph, GraphProperty param, int node) {
 			this.graph = graph;
-			this.params = params;
+			this.param = param;
 			this.node = node;
 		}
 
+		public Object calculate() {
+			return param.calculate(node, graph);
+		}
 	}
 
 	public static class NodeCalcResult {
 
-		final int pathsSum;
-		final float localClustering;
-		final int inDegree;
+		final Object result;
 
-		public NodeCalcResult(int pathsSum, float localClustering, int inDegree) {
-			this.pathsSum = pathsSum;
-			this.localClustering = localClustering;
-			this.inDegree = inDegree;
+		public NodeCalcResult(Object result) {
+			this.result = result;
 		}
 	}
 }

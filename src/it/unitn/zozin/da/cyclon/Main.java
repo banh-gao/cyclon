@@ -13,8 +13,7 @@ import akka.actor.ActorSystem;
 import akka.actor.PoisonPill;
 import akka.pattern.PatternsCS;
 import akka.util.Timeout;
-import it.unitn.zozin.da.cyclon.DataProcessor.GraphProperty;
-import it.unitn.zozin.da.cyclon.DataProcessor.RoundData;
+import it.unitn.zozin.da.cyclon.GraphActor.RoundData;
 import it.unitn.zozin.da.cyclon.SimulationActor.Configuration;
 import it.unitn.zozin.da.cyclon.SimulationActor.SimulationDataMessage;
 import scala.concurrent.duration.FiniteDuration;
@@ -39,7 +38,7 @@ public class Main {
 
 		out = new PrintWriter("OUTPUT.dat");
 
-		if (args.length > 1 && "debug".equalsIgnoreCase(args[1]))
+		if (!System.getProperty("it.unitn.zozin.da.cyclon.debug", "").isEmpty())
 			Main.LOGGER.setLevel(Level.ALL);
 		else
 			Main.LOGGER.setLevel(Level.OFF);
@@ -59,10 +58,8 @@ public class Main {
 			int round = e.getKey();
 			RoundData roundData = e.getValue();
 
-			// Write all properties for current round
-			for (GraphProperty prop : roundData.roundValues.keySet()) {
-				out.write(prop.serializeData(roundData.roundValues.get(prop), round));
-			}
+			// Write property for current round
+			out.write(data.conf.MEASURE.serializeData(roundData.roundValue, round));
 		}
 		out.close();
 	}

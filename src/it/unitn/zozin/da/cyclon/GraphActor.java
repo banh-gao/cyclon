@@ -3,14 +3,10 @@ package it.unitn.zozin.da.cyclon;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.NavigableSet;
-import java.util.Set;
-import java.util.TreeMap;
 import java.util.TreeSet;
 import akka.actor.AbstractFSM;
 import akka.actor.ActorRef;
 import akka.actor.Props;
-import it.unitn.zozin.da.cyclon.DataProcessor.GraphProperty;
-import it.unitn.zozin.da.cyclon.DataProcessor.RoundData;
 import it.unitn.zozin.da.cyclon.NodeActor.EndRoundMessage;
 import it.unitn.zozin.da.cyclon.NodeActor.MeasureDataMessage;
 import it.unitn.zozin.da.cyclon.NodeActor.NodeCalcResult;
@@ -50,11 +46,11 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 
 		private final int totalNodes;
 		private int count;
-		final Set<GraphProperty> params;
+		final GraphProperty param;
 
-		public MeasureStateData(int totalNodes, Set<GraphProperty> params) {
+		public MeasureStateData(int totalNodes, GraphProperty param) {
 			this.totalNodes = totalNodes;
-			this.params = params;
+			this.param = param;
 		}
 
 		public void increaseOne() {
@@ -69,18 +65,19 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 	class CalcStateData implements StateData {
 
 		final public int total;
-		final public Set<GraphProperty> params;
+		final public GraphProperty prop;
 
-		public Map<Integer, Integer> inDegreeDistr;
-		public float aggClustering;
-		public int aggTotalDistance;
+		public Object tempCalcValue;
 
 		public int current = 0;
 
-		public CalcStateData(int total, Set<GraphProperty> params) {
+		public CalcStateData(int total, GraphProperty param) {
 			this.total = total;
-			this.params = params;
-			this.inDegreeDistr = new TreeMap<Integer, Integer>();
+			this.prop = param;
+		}
+
+		public void aggregateData(Object val) {
+			this.tempCalcValue = prop.aggregate(this.tempCalcValue, val);
 		}
 
 		public boolean isCompleted() {
@@ -89,6 +86,10 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 
 		public void increaseOne() {
 			current++;
+		}
+
+		public Object computeFinalData() {
+			return prop.computeFinal(this.tempCalcValue, total);
 		}
 
 	}
@@ -176,7 +177,7 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 		}
 
 		adjacencyMatrix = new boolean[pendingNodes][pendingNodes];
-		return goTo(State.MeasureRunning).using(new MeasureStateData(pendingNodes, msg.params));
+		return goTo(State.MeasureRunning).using(new MeasureStateData(pendingNodes, msg.param));
 	}
 
 	private akka.actor.FSM.State<State, StateData> processNodeMeasure(MeasureDataMessage measure, MeasureStateData measureStateData) {
@@ -188,52 +189,32 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 		}
 
 		if (measureStateData.isCompleted()) {
-			return executeNodeCalculation(measureStateData.params);
+			return executeNodeCalculation(measureStateData.param);
 		} else {
 			return stay();
 		}
 	}
 
-	private akka.actor.FSM.State<State, StateData> executeNodeCalculation(Set<GraphProperty> params) {
+	private akka.actor.FSM.State<State, StateData> executeNodeCalculation(GraphProperty param) {
 
 		for (ActorRef child : JavaConversions.asJavaIterable(context().children())) {
-			child.tell(new NodeCalcTask(adjacencyMatrix, params, toIndex(child)), self());
+			child.tell(new NodeCalcTask(adjacencyMatrix, param, toIndex(child)), self());
 		}
 
-		return goTo(State.CalcRunning).using(new CalcStateData(adjacencyMatrix.length, params));
+		return goTo(State.CalcRunning).using(new CalcStateData(adjacencyMatrix.length, param));
 	}
 
 	private akka.actor.FSM.State<State, StateData> processCalcResult(NodeCalcResult result, CalcStateData calcState) {
-		if (calcState.params.contains(GraphProperty.PATH_LEN))
-			calcState.aggTotalDistance += result.pathsSum;
-		if (calcState.params.contains(GraphProperty.CLUSTERING))
-			calcState.aggClustering += result.localClustering;
-		if (calcState.params.contains(GraphProperty.IN_DEGREE))
-			calcState.inDegreeDistr.compute(result.inDegree, (k, v) -> (v == null) ? 1 : v + 1);
+		calcState.aggregateData(result.result);
 
 		calcState.increaseOne();
-
 		if (calcState.isCompleted()) {
-			RoundData processedRound = computeFinalData(calcState);
+			RoundData processedRound = new RoundData(calcState.computeFinalData());
 			taskSender.tell(processedRound, self());
 			return goTo(State.Idle);
 		} else {
 			return stay();
 		}
-	}
-
-	private RoundData computeFinalData(CalcStateData calcState) {
-		RoundData data = new RoundData();
-		if (calcState.params.contains(GraphProperty.PATH_LEN))
-			data.addData(GraphProperty.PATH_LEN, calcState.aggTotalDistance / (float) (calcState.total * (calcState.total - 1)));
-
-		if (calcState.params.contains(GraphProperty.CLUSTERING))
-			data.addData(GraphProperty.CLUSTERING, calcState.aggClustering / calcState.total);
-
-		if (calcState.params.contains(GraphProperty.IN_DEGREE))
-			data.addData(GraphProperty.IN_DEGREE, calcState.inDegreeDistr);
-
-		return data;
 	}
 
 	private int toIndex(ActorRef sender) {
@@ -284,11 +265,25 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 
 	public static class StartMeasureMessage {
 
-		final Set<GraphProperty> params;
+		final GraphProperty param;
 
-		public StartMeasureMessage(Set<GraphProperty> params) {
-			super();
-			this.params = params;
+		public StartMeasureMessage(GraphProperty param) {
+			this.param = param;
+		}
+	}
+
+	public static class RoundData {
+
+		public static final RoundData EMPTY_DATA = new RoundData(null);
+		final Object roundValue;
+
+		public RoundData(Object roundValue) {
+			this.roundValue = roundValue;
+		}
+
+		@Override
+		public String toString() {
+			return "RoundData " + roundValue;
 		}
 	}
 }
