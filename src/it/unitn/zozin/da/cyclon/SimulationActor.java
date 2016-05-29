@@ -49,6 +49,7 @@ class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationState
 	static class SimulationStateData {
 
 		private final int total;
+		private int current = 0;
 
 		final List<RoundData> simData = new LinkedList<RoundData>();
 
@@ -57,19 +58,23 @@ class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationState
 		}
 
 		public boolean isLast() {
-			return simData.size() == total - 1;
+			return current == total - 1;
 		}
 
 		public boolean isCompleted() {
-			return simData.size() == total;
+			return current == total;
 		}
 
-		public void increaseRound(RoundData data) {
+		public void addData(RoundData data) {
 			simData.add(data);
 		}
 
+		public void increaseRound() {
+			current++;
+		}
+
 		public int getRound() {
-			return simData.size();
+			return current;
 		}
 	}
 
@@ -117,7 +122,7 @@ class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationState
 		// If the measure has to be taken only at the end, skip if this is not
 		// the last round
 		if (conf.FINAL_MEASURE_MODE && !simState.isLast()) {
-			return controlSimulationRoundEnd(simState, RoundData.EMPTY_DATA);
+			return controlSimulationRoundEnd(simState);
 		}
 
 		if (simState.getRound() == BOOT_ROUND)
@@ -131,12 +136,12 @@ class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationState
 
 	private akka.actor.FSM.State<State, SimulationStateData> processMeasure(RoundData roundMeasureMsg, SimulationStateData simState) {
 		Main.LOGGER.log(Level.INFO, "[completed] -> " + roundMeasureMsg + "\n");
-		return controlSimulationRoundEnd(simState, roundMeasureMsg);
+		simState.addData(roundMeasureMsg);
+		return controlSimulationRoundEnd(simState);
 	}
 
-	private akka.actor.FSM.State<State, SimulationStateData> controlSimulationRoundEnd(SimulationStateData simState, RoundData data) {
-		simState.increaseRound(data);
-
+	private akka.actor.FSM.State<State, SimulationStateData> controlSimulationRoundEnd(SimulationStateData simState) {
+		simState.increaseRound();
 		if (simState.isCompleted()) {
 			// Send report back to simulation starter
 			simSender.tell(new SimulationDataMessage(conf, simState.simData), self());

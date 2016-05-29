@@ -235,7 +235,6 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 			this.requiredNodes = requiredNodes;
 			this.cacheSize = cacheSize;
 			this.shuffleLength = shuffleLength;
-
 		}
 
 	}
@@ -274,7 +273,6 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 
 	public static class RoundData {
 
-		public static final RoundData EMPTY_DATA = new RoundData(null);
 		final Object roundValue;
 
 		public RoundData(Object roundValue) {

@@ -57,7 +57,6 @@ public class Main {
 		for (Entry<Integer, RoundData> e : data.simData.entrySet()) {
 			int round = e.getKey();
 			RoundData roundData = e.getValue();
-
 			// Write property for current round
 			out.write(data.conf.MEASURE.serializeData(roundData.roundValue, round));
 		}

@@ -34,7 +34,7 @@ public enum GraphProperty {
 		@SuppressWarnings("unchecked")
 		Object aggregate(Object inDegreeDistr, Object nodeInDegree) {
 			if (inDegreeDistr == null)
-				return new TreeMap<Integer, Integer>();
+				inDegreeDistr = new TreeMap<Integer, Integer>();
 			((Map<Integer, Integer>) inDegreeDistr).compute((Integer) nodeInDegree, (k, v) -> (v == null) ? 1 : v + 1);
 			return inDegreeDistr;
 		}
