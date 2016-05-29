@@ -9,8 +9,9 @@ import akka.actor.AbstractFSM;
 import akka.actor.ActorRef;
 import it.unitn.zozin.da.cyclon.DataProcessor.GraphProperty;
 import it.unitn.zozin.da.cyclon.NeighborsCache.Neighbor;
+import it.unitn.zozin.da.cyclon.NodeActor.ReplyStateData;
 
-public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData> {
+public class NodeActor extends AbstractFSM<NodeActor.State, ReplyStateData> {
 
 	public static final int JOIN_TTL = 5;
 
@@ -18,17 +19,13 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 		Uninitialized, WaitingForReply, Idle
 	}
 
-	interface StateData {
-
-	}
-
-	class AnswerCount implements StateData {
+	class ReplyStateData {
 
 		private final int total;
 		private final List<Neighbor> requestList;
 		private int count = 0;
 
-		public AnswerCount(int total, List<Neighbor> requestList) {
+		public ReplyStateData(int total, List<Neighbor> requestList) {
 			this.total = total;
 			this.requestList = requestList;
 		}
@@ -52,18 +49,18 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 		when(State.Idle, matchEvent(StartRoundMessage.class, (startRoundMsg, data) -> processStartRound()));
 
 		// Process cyclon answer for pending request and end the current round
-		when(State.WaitingForReply, matchEvent(CyclonNodeAnswer.class, AnswerCount.class, (answerMsg, ansCount) -> processCyclonAnswer(answerMsg, ansCount)));
+		when(State.WaitingForReply, matchEvent(CyclonNodeAnswer.class, ReplyStateData.class, (answerMsg, ansCount) -> processCyclonAnswer(answerMsg, ansCount)));
 
 		// Process cyclon join and node list request
 		// (no state transition)
-		when(State.Idle, matchEvent(CyclonJoin.class, (joinMsg, data) -> processJoinRequest(joinMsg, Collections.emptyList())));
-		when(State.Idle, matchEvent(CyclonNodeRequest.class, (nodeListMsg, data) -> processCyclonRequest(nodeListMsg, Collections.emptyList())));
+		when(State.Idle, matchEvent(CyclonJoin.class, (joinMsg, data) -> processJoinRequest(joinMsg)));
+		when(State.Idle, matchEvent(CyclonNodeRequest.class, (nodeListMsg, data) -> processCyclonRequest(nodeListMsg)));
 
 		// Process cyclon join and node list request in the special case in
 		// which this node is waiting for an answer for the current round
 		// (no state transition)
-		when(State.WaitingForReply, matchEvent(CyclonJoin.class, AnswerCount.class, (joinMsg, pendingReqData) -> processJoinRequest(joinMsg, pendingReqData.requestList)));
-		when(State.WaitingForReply, matchEvent(CyclonNodeRequest.class, AnswerCount.class, (reqMsg, pendingReqData) -> processCyclonRequest(reqMsg, pendingReqData.requestList)));
+		when(State.WaitingForReply, matchEvent(CyclonJoin.class, ReplyStateData.class, (joinMsg, pendingReqData) -> processJoinRequestOnWaiting(joinMsg, pendingReqData.requestList)));
+		when(State.WaitingForReply, matchEvent(CyclonNodeRequest.class, ReplyStateData.class, (reqMsg, pendingReqData) -> processCyclonRequestOnWaiting(reqMsg, pendingReqData.requestList)));
 
 		// Process measure and calc requests (no state transition)
 		when(State.Idle, matchEvent(StartMeasureMessage.class, (startMeasureMsg, data) -> processMeasureRequest()));
@@ -87,14 +84,14 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 		this.selfAddress = new Neighbor(0, self());
 	}
 
-	private akka.actor.FSM.State<State, StateData> processStartRound() {
+	private akka.actor.FSM.State<State, ReplyStateData> processStartRound() {
 		if (!isJoined)
 			return performJoin();
 		else
 			return sendCyclonRequest();
 	}
 
-	private akka.actor.FSM.State<State, StateData> processBootNode(BootNodeMessage message) {
+	private akka.actor.FSM.State<State, ReplyStateData> processBootNode(BootNodeMessage message) {
 		// Initialize cache with the boot initializer
 		cache.addNeighbors(Collections.singletonList(new Neighbor(0, message.introducer)));
 
@@ -102,15 +99,19 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 		return goTo(State.Idle);
 	}
 
-	private akka.actor.FSM.State<State, StateData> performJoin() {
+	private akka.actor.FSM.State<State, ReplyStateData> performJoin() {
 		Neighbor introducer = cache.getRandomNeighbor();
 
 		introducer.address.tell(new CyclonJoin(JOIN_TTL + 1), self());
 
-		return goTo(State.WaitingForReply).using(new AnswerCount(cache.maxSize(), Collections.emptyList()));
+		return goTo(State.WaitingForReply).using(new ReplyStateData(cache.maxSize(), Collections.emptyList()));
 	}
 
-	private akka.actor.FSM.State<State, StateData> processJoinRequest(CyclonJoin joinReq, List<Neighbor> pendingRequestList) {
+	private akka.actor.FSM.State<State, ReplyStateData> processJoinRequest(CyclonJoin joinReq) {
+		return processJoinRequestOnWaiting(joinReq, Collections.emptyList());
+	}
+
+	private akka.actor.FSM.State<State, ReplyStateData> processJoinRequestOnWaiting(CyclonJoin joinReq, List<Neighbor> pendingRequestList) {
 		joinReq = joinReq.getAged();
 
 		// This is the introducer of the sender node
@@ -135,8 +136,7 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 	}
 
 	private void sendCyclonJoinAnswer(List<Neighbor> pendingRequestList) {
-		List<Neighbor> selected = cache.removeRandomNeighbors(1);
-
+		List<Neighbor> selected = cache.removeRandomNeighbors(1, sender());
 		cache.addNeighbors(Collections.singletonList(new Neighbor(0, sender())));
 
 		if (selected.isEmpty() && !pendingRequestList.isEmpty())
@@ -145,7 +145,7 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 		sender().tell(new CyclonNodeAnswer(selected), self());
 	}
 
-	private akka.actor.FSM.State<State, StateData> sendCyclonRequest() {
+	private akka.actor.FSM.State<State, ReplyStateData> sendCyclonRequest() {
 		cache.increaseNeighborsAge();
 
 		List<Neighbor> replaceable = new ArrayList<>();
@@ -162,15 +162,19 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 
 		dest.address.tell(new CyclonNodeRequest(requestNodes), self());
 
-		return goTo(State.WaitingForReply).using(new AnswerCount(1, replaceable));
+		return goTo(State.WaitingForReply).using(new ReplyStateData(1, replaceable));
 	}
 
-	private akka.actor.FSM.State<State, StateData> processCyclonRequest(CyclonNodeRequest req, List<Neighbor> pendingRequestList) {
+	private akka.actor.FSM.State<State, ReplyStateData> processCyclonRequest(CyclonNodeRequest req) {
+		return processCyclonRequestOnWaiting(req, Collections.emptyList());
+	}
+
+	private akka.actor.FSM.State<State, ReplyStateData> processCyclonRequestOnWaiting(CyclonNodeRequest req, List<Neighbor> pendingRequestList) {
 		// Remove itself (if present)
 		req.nodes.remove(selfAddress);
 
 		// Answer contains at most the same amount of entries as the request
-		List<Neighbor> ansNodes = cache.removeRandomNeighbors(req.nodes.size());
+		List<Neighbor> ansNodes = cache.removeRandomNeighbors(req.nodes.size(), sender());
 
 		if (ansNodes.size() < req.nodes.size() && !pendingRequestList.isEmpty()) {
 			ansNodes.addAll(pendingRequestList.subList(0, Math.min(req.nodes.size() - ansNodes.size(), pendingRequestList.size())));
@@ -183,7 +187,7 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 		return stay();
 	}
 
-	private akka.actor.FSM.State<State, StateData> processCyclonAnswer(CyclonNodeAnswer answer, AnswerCount ansCount) {
+	private akka.actor.FSM.State<State, ReplyStateData> processCyclonAnswer(CyclonNodeAnswer answer, ReplyStateData ansCount) {
 		ansCount.increaseOne();
 
 		// Remove itself (if present)
@@ -209,7 +213,7 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 		context().parent().tell(new EndRoundMessage(), self());
 	}
 
-	private akka.actor.FSM.State<State, StateData> processMeasureRequest() {
+	private akka.actor.FSM.State<State, ReplyStateData> processMeasureRequest() {
 		MeasureDataMessage m = new MeasureDataMessage(cache.getNeighbors().stream().map((n) -> n.address).collect(Collectors.toList()));
 
 		sender().tell(m, self());
@@ -217,7 +221,7 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 		return stay();
 	}
 
-	private akka.actor.FSM.State<State, StateData> processCalcRequest(NodeCalcTask message) {
+	private akka.actor.FSM.State<State, ReplyStateData> processCalcRequest(NodeCalcTask message) {
 		sender().tell(DataProcessor.calcNode(message), self());
 		return stay();
 	}
