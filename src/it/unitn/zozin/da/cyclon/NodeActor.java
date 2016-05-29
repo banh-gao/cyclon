@@ -25,10 +25,12 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 	class AnswerCount implements StateData {
 
 		private final int total;
+		private final List<Neighbor> requestList;
 		private int count = 0;
 
-		public AnswerCount(int total) {
+		public AnswerCount(int total, List<Neighbor> requestList) {
 			this.total = total;
+			this.requestList = requestList;
 		}
 
 		public void increaseOne() {
@@ -54,10 +56,14 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 
 		// Process cyclon join and node list request
 		// (no state transition)
-		when(State.Idle, matchEvent(CyclonJoin.class, (joinMsg, data) -> processJoinRequest(joinMsg)));
-		when(State.Idle, matchEvent(CyclonNodeRequest.class, (nodeListMsg, data) -> processCyclonRequest(nodeListMsg)));
-		when(State.WaitingForReply, matchEvent(CyclonJoin.class, (joinMsg, data) -> processJoinRequest(joinMsg)));
-		when(State.WaitingForReply, matchEvent(CyclonNodeRequest.class, (reqMsg, data) -> processCyclonRequest(reqMsg)));
+		when(State.Idle, matchEvent(CyclonJoin.class, (joinMsg, data) -> processJoinRequest(joinMsg, Collections.emptyList())));
+		when(State.Idle, matchEvent(CyclonNodeRequest.class, (nodeListMsg, data) -> processCyclonRequest(nodeListMsg, Collections.emptyList())));
+
+		// Process cyclon join and node list request in the special case in
+		// which this node is waiting for an answer for the current round
+		// (no state transition)
+		when(State.WaitingForReply, matchEvent(CyclonJoin.class, AnswerCount.class, (joinMsg, pendingReqData) -> processJoinRequest(joinMsg, pendingReqData.requestList)));
+		when(State.WaitingForReply, matchEvent(CyclonNodeRequest.class, AnswerCount.class, (reqMsg, pendingReqData) -> processCyclonRequest(reqMsg, pendingReqData.requestList)));
 
 		// Process measure and calc requests (no state transition)
 		when(State.Idle, matchEvent(StartMeasureMessage.class, (startMeasureMsg, data) -> processMeasureRequest()));
@@ -65,11 +71,11 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 	}
 
 	private Neighbor selfAddress;
-
-	private final NeighborsCache cache;
 	private final int shuffleLength;
 
 	private boolean isJoined = false;
+
+	private final NeighborsCache cache;
 
 	public NodeActor(int cacheSize, int shuffleLength) {
 		this.cache = new NeighborsCache(cacheSize);
@@ -90,21 +96,21 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 
 	private akka.actor.FSM.State<State, StateData> processBootNode(BootNodeMessage message) {
 		// Initialize cache with the boot initializer
-		cache.updateNeighbors(Collections.singletonList(new Neighbor(0, message.introducer)), false);
+		cache.addNeighbors(Collections.singletonList(new Neighbor(0, message.introducer)));
 
 		sender().tell(new BootNodeEndedMessage(), self());
 		return goTo(State.Idle);
 	}
 
 	private akka.actor.FSM.State<State, StateData> performJoin() {
-		ActorRef introducer = cache.selectOldestNeighbor().address;
+		Neighbor introducer = cache.getRandomNeighbor();
 
-		introducer.tell(new CyclonJoin(JOIN_TTL + 1), self());
+		introducer.address.tell(new CyclonJoin(JOIN_TTL + 1), self());
 
-		return goTo(State.WaitingForReply).using(new AnswerCount(cache.maxSize()));
+		return goTo(State.WaitingForReply).using(new AnswerCount(cache.maxSize(), Collections.emptyList()));
 	}
 
-	private akka.actor.FSM.State<State, StateData> processJoinRequest(CyclonJoin joinReq) {
+	private akka.actor.FSM.State<State, StateData> processJoinRequest(CyclonJoin joinReq, List<Neighbor> pendingRequestList) {
 		joinReq = joinReq.getAged();
 
 		// This is the introducer of the sender node
@@ -115,7 +121,7 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 		} else {
 			if (joinReq.isTimedOut()) {
 				// If random walk ends here
-				sendCyclonJoinAnswer();
+				sendCyclonJoinAnswer(pendingRequestList);
 			} else {
 				forwardJoin(joinReq);
 			}
@@ -128,48 +134,66 @@ public class NodeActor extends AbstractFSM<NodeActor.State, NodeActor.StateData>
 		cache.getRandomNeighbor().address.forward(joinReq, context());
 	}
 
-	private void sendCyclonJoinAnswer() {
-		List<Neighbor> selected = cache.selectRandomNeighbors(1, sender());
-		cache.updateNeighbors(Collections.singletonList(new Neighbor(0, sender())), false);
+	private void sendCyclonJoinAnswer(List<Neighbor> pendingRequestList) {
+		List<Neighbor> selected = cache.removeRandomNeighbors(1);
+
+		cache.addNeighbors(Collections.singletonList(new Neighbor(0, sender())));
+
+		if (selected.isEmpty() && !pendingRequestList.isEmpty())
+			selected = pendingRequestList.subList(0, 1);
+
 		sender().tell(new CyclonNodeAnswer(selected), self());
 	}
 
 	private akka.actor.FSM.State<State, StateData> sendCyclonRequest() {
 		cache.increaseNeighborsAge();
 
-		Neighbor dest = cache.selectOldestNeighbor();
+		List<Neighbor> replaceable = new ArrayList<>();
 
-		// Get random neighbors (excluding destination neighbor)
-		List<Neighbor> requestNodes = cache.selectRandomNeighbors(shuffleLength - 1, dest.address);
+		Neighbor dest = cache.removeOldestNeighbor();
+		replaceable.add(dest);
+
+		// Get other random neighbors
+		List<Neighbor> requestNodes = cache.removeRandomNeighbors(shuffleLength - 1);
+		replaceable.addAll(requestNodes);
 
 		// Add fresh local node address
 		requestNodes.add(selfAddress);
 
 		dest.address.tell(new CyclonNodeRequest(requestNodes), self());
 
-		return goTo(State.WaitingForReply).using(new AnswerCount(1));
+		return goTo(State.WaitingForReply).using(new AnswerCount(1, replaceable));
 	}
 
-	private akka.actor.FSM.State<State, StateData> processCyclonRequest(CyclonNodeRequest req) {
+	private akka.actor.FSM.State<State, StateData> processCyclonRequest(CyclonNodeRequest req, List<Neighbor> pendingRequestList) {
 		// Remove itself (if present)
 		req.nodes.remove(selfAddress);
 
-		List<Neighbor> ansNodes = cache.selectRandomNeighbors(shuffleLength, sender());
+		// Answer contains at most the same amount of entries as the request
+		List<Neighbor> ansNodes = cache.removeRandomNeighbors(req.nodes.size());
+
+		if (ansNodes.size() < req.nodes.size() && !pendingRequestList.isEmpty()) {
+			ansNodes.addAll(pendingRequestList.subList(0, Math.min(req.nodes.size() - ansNodes.size(), pendingRequestList.size())));
+		}
+
 		sender().tell(new CyclonNodeAnswer(ansNodes), self());
 
-		cache.updateNeighbors(req.nodes, false);
+		cache.addNeighbors(req.nodes);
 
 		return stay();
 	}
 
 	private akka.actor.FSM.State<State, StateData> processCyclonAnswer(CyclonNodeAnswer answer, AnswerCount ansCount) {
+		ansCount.increaseOne();
+
 		// Remove itself (if present)
 		answer.nodes.remove(selfAddress);
 
-		ansCount.increaseOne();
-
 		// Save received nodes in cache
-		cache.updateNeighbors(answer.nodes, true);
+		cache.addNeighbors(answer.nodes);
+
+		// Fill cache by storing again the entries sent in the request
+		cache.addNeighbors(ansCount.requestList);
 
 		if (ansCount.isCompleted()) {
 			isJoined = true;

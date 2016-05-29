@@ -46,7 +46,7 @@ class DataProcessor {
 				neighbors.add(neighbor);
 
 		// Graph induced by a node with less than two neighbors has 0 edges
-		// clustering coefficient equals to 0
+		// thus the clustering coefficient equals to 0
 		if (neighbors.size() < 2)
 			return 0;
 

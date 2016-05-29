@@ -15,17 +15,14 @@ import akka.actor.ActorRef;
 public class NeighborsCache {
 
 	private final int MAX_SIZE;
-
-	private final List<Neighbor> cache;
-
 	private final Random rand;
-	Set<Integer> selectedEntries;
+
+	private final Set<Neighbor> cache;
 
 	public NeighborsCache(int maxSize) {
-		selectedEntries = new HashSet<Integer>();
 		this.MAX_SIZE = maxSize;
 		this.rand = new Random();
-		cache = new ArrayList<Neighbor>();
+		cache = new HashSet<Neighbor>(maxSize);
 	}
 
 	public void increaseNeighborsAge() {
@@ -33,77 +30,81 @@ public class NeighborsCache {
 			n.age += 1;
 	}
 
-	public Neighbor selectOldestNeighbor() {
-		int oldestIndex = getOldestEntry();
-
-		selectedEntries.add(oldestIndex);
-		return cache.get(oldestIndex);
-	}
-
-	private int getOldestEntry() {
-		int oldestAge = -1;
-		int oldestIndex = -1;
-
-		for (int i = 0; i < cache.size(); i++) {
-			int age = cache.get(i).age;
-			if (age > oldestAge) {
-				oldestAge = age;
-				oldestIndex = i;
-			}
-		}
-
-		return oldestIndex;
-	}
-
 	public Neighbor getRandomNeighbor() {
-		return cache.get(rand.nextInt(cache.size()));
+		// FIXME: use faster implementation
+		Iterator<Neighbor> i = cache.iterator();
+		Neighbor n = i.next();
+
+		int v = rand.nextInt(cache.size());
+
+		for (int p = 1; p < v; p++)
+			n = i.next();
+
+		return n;
 	}
 
-	public List<Neighbor> selectRandomNeighbors(int shuffleLength) {
-		return selectRandomNeighbors(shuffleLength, null);
-	}
+	public int addNeighbors(Collection<Neighbor> newEntries) {
+		int added = 0;
+		for (Neighbor n : newEntries) {
+			// Stop when there are no free slots anymore
+			if (freeSlots() == 0)
+				break;
 
-	public List<Neighbor> selectRandomNeighbors(int shuffleLength, ActorRef exclude) {
-		List<Neighbor> out = new ArrayList<Neighbor>();
-
-		List<Integer> selected = IntStream.range(0, cache.size()).boxed().collect(Collectors.toList());
-		Collections.shuffle(selected, rand);
-		selected = selected.subList(0, Math.min(shuffleLength, selected.size()));
-
-		selectedEntries.addAll(selected);
-
-		for (Integer i : selected) {
-			Neighbor n = cache.get(i);
-			if (exclude == null || !n.address.equals(exclude))
-				out.add(n);
+			// Add only if not already contained in cache
+			if (cache.add(n))
+				added++;
 		}
-
-		return out;
+		return added;
 	}
 
-	public void updateNeighbors(Collection<Neighbor> newEntries, boolean overwriteOldest) {
+	/**
+	 * Remove up to max random neigbhors from the cache
+	 * 
+	 * @param max
+	 * @return The removed neighbors
+	 */
+	public List<Neighbor> removeRandomNeighbors(int max) {
+		return removeRandomNeighbors(max, null);
+	}
 
-		Iterator<Integer> replaceableEntriesIter = selectedEntries.iterator();
+	/**
+	 * Remove up to max random neigbhors from the cache. The specified element
+	 * is excluded from removal.
+	 * 
+	 * @param max
+	 * @param exclude
+	 * @return The removed neighbors
+	 */
+	public List<Neighbor> removeRandomNeighbors(int max, ActorRef exclude) {
+		List<Integer> toRemove = IntStream.range(0, cache.size()).boxed().collect(Collectors.toList());
+		Collections.shuffle(toRemove, rand);
+		// FIXME: remove excluded already here
+		toRemove = toRemove.subList(0, Math.min(max, toRemove.size()));
 
-		for (Neighbor newNeighbor : newEntries) {
-			// If the are no free cache slots, remove a replaceable entry before
-			// inserting the new one
+		List<Neighbor> removed = new ArrayList<Neighbor>();
+		int i = 0;
+		for (Neighbor n : cache)
+			if (toRemove.contains(i++) && (exclude == null || !n.address.equals(exclude)))
+				removed.add(n);
 
-			int newEntryIndex = (cache.size() == 0) ? 0 : cache.size() - 1;
+		cache.removeAll(removed);
 
-			if (freeSlots() == 0) {
-				if (!replaceableEntriesIter.hasNext() && overwriteOldest) {
-					newEntryIndex = getOldestEntry();
-				} else {
-					newEntryIndex = replaceableEntriesIter.next();
-					replaceableEntriesIter.remove();
-				}
+		return removed;
 
-				cache.remove(newEntryIndex);
+	}
+
+	public Neighbor removeOldestNeighbor() {
+		Neighbor oldest = null;
+
+		for (Neighbor n : cache) {
+			if (oldest == null || n.age > oldest.age) {
+				oldest = n;
 			}
-
-			cache.add(newEntryIndex, newNeighbor);
 		}
+
+		cache.remove(oldest);
+
+		return oldest;
 	}
 
 	@Override
@@ -112,12 +113,11 @@ public class NeighborsCache {
 	}
 
 	/**
-	 * Neighbor objects are sorted only by age (Comparable interface) but the
-	 * equals method compares only the address (This class is inconsistent with
-	 * the Comparable interface specification)
+	 * Neighbor objects equals method compares only the address (This class is
+	 * inconsistent with the Comparable interface specification)
 	 *
 	 */
-	public static class Neighbor implements Comparable<Neighbor>, Cloneable {
+	public static class Neighbor implements Cloneable {
 
 		Integer age;
 		final ActorRef address;
@@ -133,16 +133,16 @@ public class NeighborsCache {
 		}
 
 		@Override
-		public int compareTo(Neighbor o2) {
-			return age.compareTo(o2.age);
-		}
-
-		@Override
 		public int hashCode() {
 			final int prime = 31;
 			int result = 1;
 			result = prime * result + ((address == null) ? 0 : address.hashCode());
 			return result;
+		}
+
+		@Override
+		public Neighbor clone() {
+			return new Neighbor(age, address);
 		}
 
 		@Override
@@ -161,12 +161,6 @@ public class NeighborsCache {
 				return false;
 			return true;
 		}
-
-		@Override
-		public Neighbor clone() {
-			return new Neighbor(age, address);
-		}
-
 	}
 
 	public int freeSlots() {
@@ -181,7 +175,7 @@ public class NeighborsCache {
 		return MAX_SIZE;
 	}
 
-	public List<Neighbor> getNeighbors() {
-		return Collections.unmodifiableList(cache);
+	public Set<Neighbor> getNeighbors() {
+		return Collections.unmodifiableSet(cache);
 	}
 }

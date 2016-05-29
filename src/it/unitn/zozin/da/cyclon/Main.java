@@ -54,7 +54,7 @@ public class Main {
 	}
 
 	public static void writeData(SimulationDataMessage data) {
-		out.write(String.format("#Simulation completed on %s (nodes=%d rounds=%d cache=%d topology=%s)\n", new Date().toString(), config.NODES, config.ROUNDS, config.CYCLON_CACHE_SIZE, config.BOOT_TOPOLOGY));
+		out.write(String.format("#Simulation completed on %s (nodes=%d rounds=%d cache=%d shuffle=%d topology=%s)\n", new Date().toString(), config.NODES, config.ROUNDS, config.CYCLON_CACHE_SIZE, config.CYCLON_SHUFFLE_LENGTH, config.BOOT_TOPOLOGY));
 		for (Entry<Integer, RoundData> e : data.simData.entrySet()) {
 			int round = e.getKey();
 			RoundData roundData = e.getValue();
