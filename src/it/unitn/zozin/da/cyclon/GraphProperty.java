@@ -68,6 +68,7 @@ public enum GraphProperty {
 			return nodeDist;
 		}
 
+		// Dijkstra shortest path algorithm
 		private int[] shortestPath(int src, boolean[][] graph) {
 			int[] dist = new int[graph.length];
 			boolean[] visited = new boolean[graph.length];
@@ -92,19 +93,12 @@ public enum GraphProperty {
 				visited[minVertex] = true;
 
 				for (int v = 0; v < graph.length; v++) {
-					int edgeWeight = undirectedEdgeWeight(minVertex, v, graph);
+					int edgeWeight = graph[minVertex][v] ? 1 : DIST_UNREACHABLE;
 					if (!visited[v] && edgeWeight != DIST_UNREACHABLE && dist[minVertex] != DIST_UNREACHABLE && dist[minVertex] + edgeWeight < dist[v])
 						dist[v] = dist[minVertex] + edgeWeight;
 				}
 			}
 			return dist;
-		}
-
-		private int undirectedEdgeWeight(int nodeA, int nodeB, boolean[][] graph) {
-			if (graph[nodeA][nodeB] || graph[nodeB][nodeA])
-				return 1;
-			else
-				return DIST_UNREACHABLE;
 		}
 
 		@Override

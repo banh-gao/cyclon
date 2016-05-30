@@ -135,7 +135,6 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 			ActorRef dest = toRef(e.getKey());
 			dest.tell(new NodeActor.BootNodeMessage(toRef(e.getValue())), self());
 		}
-		// TODO Auto-generated method stub
 		return goTo(State.BootRunning).using(new NodesCount(bootNodesMsg.bootNeighbors.size()));
 	}
 
