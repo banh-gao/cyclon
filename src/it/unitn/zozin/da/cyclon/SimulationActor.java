@@ -2,6 +2,8 @@ package it.unitn.zozin.da.cyclon;
 
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -9,17 +11,19 @@ import java.util.Map;
 import java.util.NavigableSet;
 import java.util.Properties;
 import java.util.Random;
-import java.util.function.BiFunction;
+import java.util.TreeSet;
+import java.util.function.Function;
 import java.util.logging.Level;
+import java.util.stream.Collectors;
 import akka.actor.AbstractFSM;
 import akka.actor.ActorRef;
 import akka.actor.ActorSystem;
 import akka.actor.Props;
-import it.unitn.zozin.da.cyclon.GraphActor.AddNodesEndedMessage;
-import it.unitn.zozin.da.cyclon.GraphActor.BootNodesEndedMessage;
+import it.unitn.zozin.da.cyclon.GraphActor.EndAddNodesMessage;
+import it.unitn.zozin.da.cyclon.GraphActor.EndBootMessage;
 import it.unitn.zozin.da.cyclon.GraphActor.RoundData;
-import it.unitn.zozin.da.cyclon.NodeActor.EndRoundMessage;
-import it.unitn.zozin.da.cyclon.NodeActor.StartRoundMessage;
+import it.unitn.zozin.da.cyclon.NodeActor.EndRound;
+import it.unitn.zozin.da.cyclon.NodeActor.StartRound;
 import it.unitn.zozin.da.cyclon.SimulationActor.SimulationStateData;
 
 class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationStateData> {
@@ -37,11 +41,11 @@ class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationState
 		when(State.Idle, matchEvent(Configuration.class, (confMsg, data) -> initSimulation(confMsg)));
 
 		// Prepare simulation
-		when(State.NodesAdding, matchEvent(AddNodesEndedMessage.class, (endAddMsg, data) -> executeNodesBoot(endAddMsg.addedNodes)));
-		when(State.NodesBoot, matchEvent(BootNodesEndedMessage.class, (endInitMsg, data) -> startSimulation()));
+		when(State.NodesAdding, matchEvent(EndAddNodesMessage.class, (endAddMsg, data) -> executeNodesBoot(endAddMsg.addedNodes)));
+		when(State.NodesBoot, matchEvent(EndBootMessage.class, (endInitMsg, data) -> startSimulation()));
 
 		// Run simulation
-		when(State.RoundRunning, matchEvent(EndRoundMessage.class, SimulationStateData.class, (endRoundMsg, simState) -> processCyclonRoundEnded(endRoundMsg, simState)));
+		when(State.RoundRunning, matchEvent(EndRound.class, SimulationStateData.class, (endRoundMsg, simState) -> processCyclonRoundEnded(endRoundMsg, simState)));
 		when(State.MeasureRunning, matchEvent(RoundData.class, SimulationStateData.class, (measureMsg, simState) -> processMeasure(measureMsg, simState)));
 
 	}
@@ -96,19 +100,19 @@ class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationState
 		simSender = sender();
 		this.conf = conf;
 
-		GRAPH.tell(new GraphActor.AddNodesMessage(conf.NODES, conf.CYCLON_CACHE_SIZE, conf.CYCLON_SHUFFLE_LENGTH), self());
+		GRAPH.tell(new GraphActor.StartAddNodesMessage(conf.NODES, conf.CYCLON_CACHE_SIZE, conf.CYCLON_SHUFFLE_LENGTH), self());
 		return goTo(State.NodesAdding);
 	}
 
-	private akka.actor.FSM.State<State, SimulationStateData> executeNodesBoot(NavigableSet<Integer> addedNodes) {
+	private akka.actor.FSM.State<State, SimulationStateData> executeNodesBoot(Collection<ActorRef> addedNodes) {
 		Main.LOGGER.log(Level.INFO, "Executing [BOOT]... ");
-		Map<Integer, Integer> introducers = new HashMap<Integer, Integer>();
-		for (int n : addedNodes) {
-			int introducer = conf.BOOT_TOPOLOGY.topologyFunc.apply(addedNodes, n);
-			introducers.put(n, introducer);
-		}
 
-		GRAPH.tell(new GraphActor.BootNodesMessage(introducers), self());
+		NavigableSet<ActorRef> actorIds = new TreeSet<ActorRef>(Comparator.comparingInt(GraphActor::actorToInt));
+		actorIds.addAll(addedNodes);
+
+		Map<ActorRef, ActorRef> introducers = actorIds.stream().collect(Collectors.toMap(Function.identity(), (n) -> conf.BOOT_TOPOLOGY.getIntroducerNode(actorIds, n)));
+
+		GRAPH.tell(new GraphActor.StartBootMessage(introducers), self());
 
 		return goTo(State.NodesBoot);
 	}
@@ -157,11 +161,11 @@ class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationState
 		else
 			Main.LOGGER.log(Level.INFO, "Executing round " + (simState.getRound()) + "... ");
 
-		GRAPH.tell(new StartRoundMessage(), self());
+		GRAPH.tell(new StartRound(), self());
 		return goTo(State.RoundRunning).using(simState);
 	}
 
-	private akka.actor.FSM.State<State, SimulationStateData> processCyclonRoundEnded(EndRoundMessage roundMsg, SimulationStateData simState) {
+	private akka.actor.FSM.State<State, SimulationStateData> processCyclonRoundEnded(EndRound roundMsg, SimulationStateData simState) {
 		Main.LOGGER.log(Level.INFO, "[completed]\n");
 		return executeMeasure(simState);
 	}
@@ -173,19 +177,29 @@ class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationState
 		private static final Random rand = new Random();
 
 		enum Topology {
-			CHAIN((nodes, i) -> {
-				return (nodes.higher(i) != null) ? nodes.higher(i) : nodes.first();
-			}), STAR((nodes, i) -> nodes.first()), RANDOM((nodes, i) -> nodes.ceiling(rand.nextInt(nodes.size())));
+			CHAIN {
 
-			private final BiFunction<NavigableSet<Integer>, Integer, Integer> topologyFunc;
+				@Override
+				ActorRef getIntroducerNode(NavigableSet<ActorRef> nodes, ActorRef n) {
+					return (nodes.higher(n) != null) ? nodes.higher(n) : nodes.first();
+				}
+			},
+			STAR {
 
-			private Topology(BiFunction<NavigableSet<Integer>, Integer, Integer> topologyFunc) {
-				this.topologyFunc = topologyFunc;
-			}
+				@Override
+				ActorRef getIntroducerNode(NavigableSet<ActorRef> nodes, ActorRef n) {
+					return nodes.first();
+				}
+			},
+			RANDOM {
 
-			int getIntroducerNode(NavigableSet<Integer> addedNodes, int nodeIndex) {
-				return topologyFunc.apply(addedNodes, nodeIndex);
-			}
+				@Override
+				ActorRef getIntroducerNode(NavigableSet<ActorRef> nodes, ActorRef n) {
+					return nodes.toArray(new ActorRef[]{})[rand.nextInt(nodes.size())];
+				}
+			};
+
+			abstract ActorRef getIntroducerNode(NavigableSet<ActorRef> nodes, ActorRef n);
 		};
 
 		public Topology BOOT_TOPOLOGY;
