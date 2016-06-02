@@ -1,17 +1,19 @@
 package it.unitn.zozin.da.cyclon;
 
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
-import java.util.NavigableSet;
-import java.util.TreeSet;
+import java.util.Set;
 import akka.actor.AbstractFSM;
 import akka.actor.ActorRef;
 import akka.actor.Props;
-import it.unitn.zozin.da.cyclon.NodeActor.EndRoundMessage;
-import it.unitn.zozin.da.cyclon.NodeActor.MeasureDataMessage;
+import it.unitn.zozin.da.cyclon.NodeActor.EndMeasureMessage;
+import it.unitn.zozin.da.cyclon.NodeActor.EndRound;
 import it.unitn.zozin.da.cyclon.NodeActor.NodeCalcResult;
 import it.unitn.zozin.da.cyclon.NodeActor.NodeCalcTask;
-import it.unitn.zozin.da.cyclon.NodeActor.StartRoundMessage;
+import it.unitn.zozin.da.cyclon.NodeActor.StartRound;
 import scala.collection.JavaConversions;
 
 public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateData> {
@@ -67,17 +69,20 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 		final public int total;
 		final public GraphProperty prop;
 
-		public Object tempCalcValue;
+		@SuppressWarnings("rawtypes")
+		public final List values;
 
 		public int current = 0;
 
 		public CalcStateData(int total, GraphProperty param) {
 			this.total = total;
 			this.prop = param;
+			this.values = new ArrayList<Object>(total);
 		}
 
+		@SuppressWarnings("unchecked")
 		public void aggregateData(Object val) {
-			this.tempCalcValue = prop.aggregate(this.tempCalcValue, val);
+			this.values.add(val);
 		}
 
 		public boolean isCompleted() {
@@ -88,8 +93,9 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 			current++;
 		}
 
+		@SuppressWarnings("unchecked")
 		public Object computeFinalData() {
-			return prop.computeFinal(this.tempCalcValue, total);
+			return values.stream().collect(prop.collector());
 		}
 
 	}
@@ -97,16 +103,16 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 	{
 		startWith(State.Idle, null);
 
-		when(State.Idle, matchEvent(AddNodesMessage.class, (addNodesMsg, data) -> processAddNodes(addNodesMsg)));
-		when(State.Idle, matchEvent(BootNodesMessage.class, (bootNodesMsg, data) -> startBoot(bootNodesMsg)));
+		when(State.Idle, matchEvent(StartAddNodesMessage.class, (addNodesMsg, data) -> processAddNodes(addNodesMsg)));
+		when(State.Idle, matchEvent(StartBootMessage.class, (bootNodesMsg, data) -> startBoot(bootNodesMsg)));
 
-		when(State.BootRunning, matchEvent(NodeActor.BootNodeEndedMessage.class, NodesCount.class, (endBootMsg, nodesCount) -> processNodeBooted(nodesCount)));
+		when(State.BootRunning, matchEvent(EndBootMessage.class, NodesCount.class, (endBootMsg, nodesCount) -> processNodeBooted(nodesCount)));
 
-		when(State.Idle, matchEvent(StartRoundMessage.class, (startRoundMsg, data) -> startRound(startRoundMsg)));
-		when(State.RoundRunning, matchEvent(NodeActor.EndRoundMessage.class, NodesCount.class, (endRoundMsg, nodesCount) -> processEndRound(nodesCount)));
+		when(State.Idle, matchEvent(StartRound.class, (startRoundMsg, data) -> startRound(startRoundMsg)));
+		when(State.RoundRunning, matchEvent(NodeActor.EndRound.class, NodesCount.class, (endRoundMsg, nodesCount) -> processEndRound(nodesCount)));
 
 		when(State.Idle, matchEvent(StartMeasureMessage.class, (startMeasureMsg, data) -> startMeasure(startMeasureMsg)));
-		when(State.MeasureRunning, matchEvent(NodeActor.MeasureDataMessage.class, MeasureStateData.class, (measureDataMsg, nodesCount) -> processNodeMeasure(measureDataMsg, nodesCount)));
+		when(State.MeasureRunning, matchEvent(NodeActor.EndMeasureMessage.class, MeasureStateData.class, (measureDataMsg, nodesCount) -> processNodeMeasure(measureDataMsg, nodesCount)));
 
 		when(State.CalcRunning, matchEvent(NodeActor.NodeCalcResult.class, CalcStateData.class, (calcDataMsg, calcState) -> processCalcResult(calcDataMsg, calcState)));
 	}
@@ -116,39 +122,39 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 
 	boolean[][] adjacencyMatrix;
 
-	private akka.actor.FSM.State<State, StateData> processAddNodes(AddNodesMessage addMsg) {
-		NavigableSet<Integer> addedNodes = new TreeSet<Integer>();
+	private akka.actor.FSM.State<State, StateData> processAddNodes(StartAddNodesMessage addMsg) {
+		Set<ActorRef> addedNodes = new HashSet<ActorRef>();
 
 		for (int i = 0; i < addMsg.requiredNodes; i++) {
-			context().actorOf(Props.create(NodeActor.class, addMsg.cacheSize, addMsg.shuffleLength), Integer.toString(i));
-			addedNodes.add(i);
+			ActorRef node = context().actorOf(Props.create(NodeActor.class, addMsg.cacheSize, addMsg.shuffleLength), Integer.toString(i));
+			addedNodes.add(node);
 		}
 
-		sender().tell(new AddNodesEndedMessage(addedNodes), self());
+		sender().tell(new EndAddNodesMessage(addedNodes), self());
 		return stay();
 	}
 
-	private akka.actor.FSM.State<State, StateData> startBoot(BootNodesMessage bootNodesMsg) {
+	private akka.actor.FSM.State<State, StateData> startBoot(StartBootMessage bootNodesMsg) {
 		taskSender = sender();
 
-		for (Entry<Integer, Integer> e : bootNodesMsg.bootNeighbors.entrySet()) {
-			ActorRef dest = toRef(e.getKey());
-			dest.tell(new NodeActor.BootNodeMessage(toRef(e.getValue())), self());
+		for (ActorRef n : bootNodesMsg.introducers.keySet()) {
+			n.tell(bootNodesMsg, self());
 		}
-		return goTo(State.BootRunning).using(new NodesCount(bootNodesMsg.bootNeighbors.size()));
+
+		return goTo(State.BootRunning).using(new NodesCount(bootNodesMsg.introducers.size()));
 	}
 
 	private akka.actor.FSM.State<State, StateData> processNodeBooted(NodesCount count) {
 		count.increaseOne();
 
 		if (count.isCompleted()) {
-			taskSender.tell(new BootNodesEndedMessage(), self());
+			taskSender.tell(new EndBootMessage(), self());
 			return goTo(State.Idle);
 		} else
 			return stay();
 	}
 
-	private akka.actor.FSM.State<State, StateData> startRound(StartRoundMessage startRoundMsg) {
+	private akka.actor.FSM.State<State, StateData> startRound(StartRound startRoundMsg) {
 		int pendingNodes = 0;
 		taskSender = sender();
 		for (ActorRef c : JavaConversions.asJavaIterable(context().children())) {
@@ -161,7 +167,7 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 	private akka.actor.FSM.State<State, StateData> processEndRound(NodesCount nodesCount) {
 		nodesCount.increaseOne();
 		if (nodesCount.isCompleted()) {
-			taskSender.tell(new EndRoundMessage(), self());
+			taskSender.tell(new EndRound(), self());
 			return goTo(State.Idle);
 		}
 		return stay();
@@ -179,11 +185,11 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 		return goTo(State.MeasureRunning).using(new MeasureStateData(pendingNodes, msg.param));
 	}
 
-	private akka.actor.FSM.State<State, StateData> processNodeMeasure(MeasureDataMessage measure, MeasureStateData measureStateData) {
+	private akka.actor.FSM.State<State, StateData> processNodeMeasure(EndMeasureMessage measure, MeasureStateData measureStateData) {
 		measureStateData.increaseOne();
-		int node = toIndex(sender());
+		int node = actorToInt(sender());
 		for (ActorRef a : measure.neighbors) {
-			int neighbor = toIndex(a);
+			int neighbor = actorToInt(a);
 			adjacencyMatrix[node][neighbor] = true;
 		}
 
@@ -197,7 +203,7 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 	private akka.actor.FSM.State<State, StateData> executeNodeCalculation(GraphProperty param) {
 
 		for (ActorRef child : JavaConversions.asJavaIterable(context().children())) {
-			child.tell(new NodeCalcTask(adjacencyMatrix, param, toIndex(child)), self());
+			child.tell(new NodeCalcTask(adjacencyMatrix, param, actorToInt(child)), self());
 		}
 
 		return goTo(State.CalcRunning).using(new CalcStateData(adjacencyMatrix.length, param));
@@ -216,21 +222,17 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 		}
 	}
 
-	private int toIndex(ActorRef sender) {
+	public static int actorToInt(ActorRef sender) {
 		return Integer.parseInt(sender.path().name());
 	}
 
-	private ActorRef toRef(int index) {
-		return context().child(Integer.toString(index)).get();
-	}
-
-	public static class AddNodesMessage {
+	public static class StartAddNodesMessage {
 
 		final int requiredNodes;
 		final int cacheSize;
 		final int shuffleLength;
 
-		public AddNodesMessage(int requiredNodes, int cacheSize, int shuffleLength) {
+		public StartAddNodesMessage(int requiredNodes, int cacheSize, int shuffleLength) {
 			this.requiredNodes = requiredNodes;
 			this.cacheSize = cacheSize;
 			this.shuffleLength = shuffleLength;
@@ -238,26 +240,30 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 
 	}
 
-	public static class AddNodesEndedMessage {
+	public static class EndAddNodesMessage {
 
-		final NavigableSet<Integer> addedNodes;
+		final Collection<ActorRef> addedNodes;
 
-		public AddNodesEndedMessage(NavigableSet<Integer> addedNodes) {
+		public EndAddNodesMessage(Collection<ActorRef> addedNodes) {
 			this.addedNodes = addedNodes;
 		}
 
 	}
 
-	public static class BootNodesMessage {
+	public static class StartBootMessage {
 
-		final Map<Integer, Integer> bootNeighbors;
+		final Map<ActorRef, ActorRef> introducers;
 
-		public BootNodesMessage(Map<Integer, Integer> bootNeighbors) {
-			this.bootNeighbors = bootNeighbors;
+		public StartBootMessage(Map<ActorRef, ActorRef> introducers) {
+			this.introducers = introducers;
+		}
+
+		public ActorRef getIntroducer(ActorRef ref) {
+			return introducers.get(ref);
 		}
 	}
 
-	public static class BootNodesEndedMessage {
+	public static class EndBootMessage {
 
 	}
 

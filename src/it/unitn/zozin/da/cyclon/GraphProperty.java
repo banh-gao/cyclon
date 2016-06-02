@@ -1,22 +1,20 @@
 package it.unitn.zozin.da.cyclon;
 
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.TreeMap;
+import java.util.Set;
+import java.util.function.BiConsumer;
+import java.util.function.BinaryOperator;
+import java.util.function.Function;
+import java.util.function.Supplier;
+import java.util.stream.Collector;
+import java.util.stream.Collectors;
 
 public enum GraphProperty {
 	IN_DEGREE {
-
-		@SuppressWarnings("unchecked")
-		@Override
-		String serializeData(Object inDegreeDistr, int round) {
-			StringBuilder b = new StringBuilder();
-			for (Entry<Integer, Integer> dist : ((Map<Integer, Integer>) inDegreeDistr).entrySet())
-				b.append(dist.getKey() + " " + dist.getValue() + "\n");
-			return b.toString();
-		}
 
 		@Override
 		Object calculate(int node, boolean[][] graph) {
@@ -30,18 +28,17 @@ public enum GraphProperty {
 		}
 
 		@Override
-
-		@SuppressWarnings("unchecked")
-		Object aggregate(Object inDegreeDistr, Object nodeInDegree) {
-			if (inDegreeDistr == null)
-				inDegreeDistr = new TreeMap<Integer, Integer>();
-			((Map<Integer, Integer>) inDegreeDistr).compute((Integer) nodeInDegree, (k, v) -> (v == null) ? 1 : v + 1);
-			return inDegreeDistr;
+		public Collector<Object, ?, Map<Object, Long>> collector() {
+			return Collectors.groupingBy(Function.identity(), Collectors.counting());
 		}
 
+		@SuppressWarnings("unchecked")
 		@Override
-		Object computeFinal(Object inDegreeDistr, int totalNodes) {
-			return inDegreeDistr;
+		String serializeData(Object inDegreeDistr, int round) {
+			StringBuilder b = new StringBuilder();
+			for (Entry<Integer, Integer> dist : ((Map<Integer, Integer>) inDegreeDistr).entrySet())
+				b.append(dist.getKey() + " " + dist.getValue() + "\n");
+			return b.toString();
 		}
 	},
 	PATH_LEN {
@@ -49,14 +46,9 @@ public enum GraphProperty {
 		private static final int DIST_UNREACHABLE = Integer.MAX_VALUE;
 
 		@Override
-		String serializeData(Object value, int round) {
-			return round + " " + value.toString() + "\n";
-		}
-
-		@Override
 		Object calculate(int node, boolean[][] graph) {
 			// Calculate the sum of all the shortest paths from this node
-			int nodeDist = 0;
+			float nodeDist = 0;
 			int[] dist = shortestPath(node, graph);
 			for (int n2 = 0; n2 < dist.length; n2++) {
 				// Ignore unreachable nodes
@@ -102,24 +94,17 @@ public enum GraphProperty {
 		}
 
 		@Override
-		Object aggregate(Object aggTotalDistance, Object nodePathsSum) {
-			if (aggTotalDistance == null)
-				return nodePathsSum;
-			return ((Integer) aggTotalDistance) + (Integer) nodePathsSum;
+		public Collector<Float, Float[], Float> collector() {
+			return new AVGCollector((state) -> state[0] / (state[1] * (state[1] - 1)));
 		}
-
-		@Override
-		Object computeFinal(Object aggTotalDistance, int totalNodes) {
-			return (Integer) aggTotalDistance / (float) (totalNodes * (totalNodes - 1));
-		}
-
-	},
-	CLUSTERING {
 
 		@Override
 		String serializeData(Object value, int round) {
 			return round + " " + value.toString() + "\n";
 		}
+
+	},
+	CLUSTERING {
 
 		@Override
 		Object calculate(int node, boolean[][] graph) {
@@ -156,23 +141,75 @@ public enum GraphProperty {
 		}
 
 		@Override
-		Object aggregate(Object aggTotalClustering, Object nodeLocalClustering) {
-			if (aggTotalClustering == null)
-				return nodeLocalClustering;
-			return ((float) aggTotalClustering) + (float) nodeLocalClustering;
+		public Collector<Float, Float[], Float> collector() {
+			return new AVGCollector((state) -> state[0] / state[1]);
 		}
 
 		@Override
-		Object computeFinal(Object aggTotalClustering, int totalnodes) {
-			return (float) aggTotalClustering / totalnodes;
+		String serializeData(Object value, int round) {
+			return round + " " + value.toString() + "\n";
 		}
 	};
 
+	/**
+	 * Convert data to string for file output
+	 * 
+	 * @param value
+	 * @param round
+	 */
 	abstract String serializeData(Object value, int round);
 
+	/**
+	 * Calculate value on single node
+	 * 
+	 * @param node
+	 * @param graph
+	 * @return
+	 */
 	abstract Object calculate(int node, boolean[][] graph);
 
-	abstract Object aggregate(Object aggregated, Object newValue);
-
-	abstract Object computeFinal(Object tempCalcValue, int totalNodes);
+	/**
+	 * Compute final value by combing values from single nodes
+	 * 
+	 * @return
+	 */
+	public abstract Collector<?, ?, ?> collector();
 }
+
+class AVGCollector implements Collector<Float, Float[], Float> {
+
+	private final Function<Float[], Float> finisher;
+
+	public AVGCollector(Function<Float[], Float> finisher) {
+		this.finisher = finisher;
+	}
+
+	@Override
+	public Supplier<Float[]> supplier() {
+		return () -> new Float[]{0f, 0f};
+	}
+
+	@Override
+	public BiConsumer<Float[], Float> accumulator() {
+		// state[0] = sum of values, state[1] = num of elements so far
+		return (state, v) -> {
+			state[0] += v;
+			state[1]++;
+		};
+	}
+
+	@Override
+	public BinaryOperator<Float[]> combiner() {
+		return null;
+	}
+
+	@Override
+	public Function<Float[], Float> finisher() {
+		return finisher;
+	}
+
+	@Override
+	public Set<java.util.stream.Collector.Characteristics> characteristics() {
+		return EnumSet.of(Characteristics.UNORDERED);
+	}
+};

@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.stream.Collectors;
 import akka.actor.AbstractFSM;
 import akka.actor.ActorRef;
+import it.unitn.zozin.da.cyclon.GraphActor.EndBootMessage;
+import it.unitn.zozin.da.cyclon.GraphActor.StartBootMessage;
 import it.unitn.zozin.da.cyclon.NeighborsCache.Neighbor;
 import it.unitn.zozin.da.cyclon.NodeActor.ReplyStateData;
 
@@ -41,10 +43,10 @@ public class NodeActor extends AbstractFSM<NodeActor.State, ReplyStateData> {
 		startWith(State.Uninitialized, null);
 
 		// Initialize the node
-		when(State.Uninitialized, matchEvent(BootNodeMessage.class, (initMsg, data) -> processBootNode(initMsg)));
+		when(State.Uninitialized, matchEvent(StartBootMessage.class, (initMsg, data) -> processBootNode(initMsg)));
 
 		// Start executing round (move to WaitingForReply state)
-		when(State.Idle, matchEvent(StartRoundMessage.class, (startRoundMsg, data) -> processStartRound()));
+		when(State.Idle, matchEvent(StartRound.class, (startRoundMsg, data) -> processStartRound()));
 
 		// Process cyclon answer for pending request and end the current round
 		when(State.WaitingForReply, matchEvent(CyclonNodeAnswer.class, ReplyStateData.class, (answerMsg, ansCount) -> processCyclonAnswer(answerMsg, ansCount)));
@@ -82,19 +84,19 @@ public class NodeActor extends AbstractFSM<NodeActor.State, ReplyStateData> {
 		this.selfAddress = new Neighbor(0, self());
 	}
 
+	private akka.actor.FSM.State<State, ReplyStateData> processBootNode(StartBootMessage message) {
+		// Initialize cache with the boot initializer
+		cache.addNeighbors(Collections.singletonList(new Neighbor(0, message.getIntroducer(self()))));
+
+		sender().tell(new EndBootMessage(), self());
+		return goTo(State.Idle);
+	}
+
 	private akka.actor.FSM.State<State, ReplyStateData> processStartRound() {
 		if (!isJoined)
 			return performJoin();
 		else
 			return sendCyclonRequest();
-	}
-
-	private akka.actor.FSM.State<State, ReplyStateData> processBootNode(BootNodeMessage message) {
-		// Initialize cache with the boot initializer
-		cache.addNeighbors(Collections.singletonList(new Neighbor(0, message.introducer)));
-
-		sender().tell(new BootNodeEndedMessage(), self());
-		return goTo(State.Idle);
 	}
 
 	private akka.actor.FSM.State<State, ReplyStateData> performJoin() {
@@ -208,14 +210,12 @@ public class NodeActor extends AbstractFSM<NodeActor.State, ReplyStateData> {
 	}
 
 	private void sendRoundCompletedStatus() {
-		context().parent().tell(new EndRoundMessage(), self());
+		context().parent().tell(new EndRound(), self());
 	}
 
 	private akka.actor.FSM.State<State, ReplyStateData> processMeasureRequest() {
-		MeasureDataMessage m = new MeasureDataMessage(cache.getNeighbors().stream().map((n) -> n.address).collect(Collectors.toList()));
-
+		EndMeasureMessage m = new EndMeasureMessage(cache.getNeighbors().stream().map((n) -> n.address).collect(Collectors.toList()));
 		sender().tell(m, self());
-
 		return stay();
 	}
 
@@ -224,25 +224,21 @@ public class NodeActor extends AbstractFSM<NodeActor.State, ReplyStateData> {
 		return stay();
 	}
 
-	public static class BootNodeMessage {
+	public static class CyclonJoin {
 
-		final ActorRef introducer;
+		final int TTL;
 
-		public BootNodeMessage(ActorRef introducer) {
-			this.introducer = introducer;
+		public CyclonJoin(int TTL) {
+			this.TTL = TTL;
 		}
-	}
 
-	public static class BootNodeEndedMessage {
+		public CyclonJoin getAged() {
+			return new CyclonJoin(TTL - 1);
+		}
 
-	}
-
-	public static class StartRoundMessage {
-
-	}
-
-	public static class EndRoundMessage {
-
+		public boolean isTimedOut() {
+			return TTL == 0;
+		}
 	}
 
 	public static abstract class CyclonNodeList {
@@ -276,35 +272,25 @@ public class NodeActor extends AbstractFSM<NodeActor.State, ReplyStateData> {
 		public CyclonNodeAnswer(List<Neighbor> nodes) {
 			super(nodes);
 		}
+	}
+
+	public static class StartRound {
 
 	}
 
-	public static class CyclonJoin {
+	public static class EndRound {
 
-		final int TTL;
-
-		public CyclonJoin(int TTL) {
-			this.TTL = TTL;
-		}
-
-		public CyclonJoin getAged() {
-			return new CyclonJoin(TTL - 1);
-		}
-
-		public boolean isTimedOut() {
-			return TTL == 0;
-		}
 	}
 
 	public static class StartMeasureMessage {
 
 	}
 
-	public static class MeasureDataMessage {
+	public static class EndMeasureMessage {
 
 		final List<ActorRef> neighbors;
 
-		public MeasureDataMessage(List<ActorRef> neighbors) {
+		public EndMeasureMessage(List<ActorRef> neighbors) {
 			this.neighbors = new ArrayList<ActorRef>(neighbors);
 		}
 	}
