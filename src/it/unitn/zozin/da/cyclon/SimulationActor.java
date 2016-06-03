@@ -2,7 +2,6 @@ package it.unitn.zozin.da.cyclon;
 
 import java.io.FileInputStream;
 import java.io.IOException;
-import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -11,6 +10,7 @@ import java.util.Map;
 import java.util.NavigableSet;
 import java.util.Properties;
 import java.util.Random;
+import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.Function;
 import java.util.logging.Level;
@@ -26,6 +26,9 @@ import it.unitn.zozin.da.cyclon.NodeActor.EndRound;
 import it.unitn.zozin.da.cyclon.NodeActor.StartRound;
 import it.unitn.zozin.da.cyclon.SimulationActor.SimulationStateData;
 
+/**
+ * Actor to control simulation execution
+ */
 class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationStateData> {
 
 	enum State {
@@ -104,12 +107,13 @@ class SimulationActor extends AbstractFSM<SimulationActor.State, SimulationState
 		return goTo(State.NodesAdding);
 	}
 
-	private akka.actor.FSM.State<State, SimulationStateData> executeNodesBoot(Collection<ActorRef> addedNodes) {
+	private akka.actor.FSM.State<State, SimulationStateData> executeNodesBoot(Set<ActorRef> addedNodes) {
 		Main.LOGGER.log(Level.INFO, "Executing [BOOT]... ");
 
 		NavigableSet<ActorRef> actorIds = new TreeSet<ActorRef>(Comparator.comparingInt(GraphActor::actorToInt));
 		actorIds.addAll(addedNodes);
 
+		// Defines the introducer for each added node
 		Map<ActorRef, ActorRef> introducers = actorIds.stream().collect(Collectors.toMap(Function.identity(), (n) -> conf.BOOT_TOPOLOGY.getIntroducerNode(actorIds, n)));
 
 		GRAPH.tell(new GraphActor.StartBootMessage(introducers), self());

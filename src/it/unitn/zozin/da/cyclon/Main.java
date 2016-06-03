@@ -27,6 +27,7 @@ public class Main {
 	public static final Logger LOGGER = Logger.getGlobal();
 
 	public static void main(String args[]) throws Exception {
+
 		if (args.length < 1) {
 			System.err.println("Expected config file as argument");
 			System.exit(1);
@@ -58,7 +59,7 @@ public class Main {
 			int round = e.getKey();
 			RoundData roundData = e.getValue();
 			// Write property for current round
-			out.write(data.conf.MEASURE.serializeData(roundData.roundValue, round));
+			out.write(data.conf.MEASURE.dataToString(roundData.roundValue, round));
 		}
 		out.close();
 	}

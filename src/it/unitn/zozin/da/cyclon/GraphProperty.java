@@ -1,6 +1,7 @@
 package it.unitn.zozin.da.cyclon;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
@@ -13,11 +14,14 @@ import java.util.function.Supplier;
 import java.util.stream.Collector;
 import java.util.stream.Collectors;
 
+/**
+ * Defines graph properties that can be calculated over the adjacency matrix
+ */
 public enum GraphProperty {
 	IN_DEGREE {
 
 		@Override
-		Object calculate(int node, boolean[][] graph) {
+		Integer calculate(int node, boolean[][] graph) {
 			// Count nodes pointing to this node
 			int nodeInDegree = 0;
 			for (int neighbor = 0; neighbor < graph.length; neighbor++)
@@ -34,7 +38,7 @@ public enum GraphProperty {
 
 		@SuppressWarnings("unchecked")
 		@Override
-		String serializeData(Object inDegreeDistr, int round) {
+		String dataToString(Object inDegreeDistr, int round) {
 			StringBuilder b = new StringBuilder();
 			for (Entry<Integer, Integer> dist : ((Map<Integer, Integer>) inDegreeDistr).entrySet())
 				b.append(dist.getKey() + " " + dist.getValue() + "\n");
@@ -46,18 +50,9 @@ public enum GraphProperty {
 		private static final int DIST_UNREACHABLE = Integer.MAX_VALUE;
 
 		@Override
-		Object calculate(int node, boolean[][] graph) {
-			// Calculate the sum of all the shortest paths from this node
-			float nodeDist = 0;
-			int[] dist = shortestPath(node, graph);
-			for (int n2 = 0; n2 < dist.length; n2++) {
-				// Ignore unreachable nodes
-				if (dist[n2] == DIST_UNREACHABLE)
-					continue;
-
-				nodeDist += dist[n2];
-			}
-			return nodeDist;
+		Float calculate(int node, boolean[][] graph) {
+			// Sums the path lengths of all the shortest paths from the node
+			return ((Long) Arrays.stream(shortestPath(node, graph)).filter((v) -> v != DIST_UNREACHABLE).mapToLong(Long::valueOf).sum()).floatValue();
 		}
 
 		// Dijkstra shortest path algorithm
@@ -99,7 +94,7 @@ public enum GraphProperty {
 		}
 
 		@Override
-		String serializeData(Object value, int round) {
+		String dataToString(Object value, int round) {
 			return round + " " + value.toString() + "\n";
 		}
 
@@ -107,7 +102,9 @@ public enum GraphProperty {
 	CLUSTERING {
 
 		@Override
-		Object calculate(int node, boolean[][] graph) {
+		Float calculate(int node, boolean[][] graph) {
+			// Calculate local clustering
+
 			List<Integer> neighbors = new ArrayList<Integer>();
 
 			// Get neighbors of the current node
@@ -116,8 +113,7 @@ public enum GraphProperty {
 					neighbors.add(neighbor);
 
 			// Graph induced by a node with less than two neighbors has 0
-			// edges
-			// thus the clustering coefficient equals to 0
+			// edges, thus the clustering coefficient equals to 0
 			if (neighbors.size() < 2)
 				return 0f;
 
@@ -135,9 +131,7 @@ public enum GraphProperty {
 						edges++;
 				}
 			}
-
-			float local = edges / (float) (neighbors.size() * (neighbors.size() - 1));
-			return local;
+			return edges / (float) (neighbors.size() * (neighbors.size() - 1));
 		}
 
 		@Override
@@ -146,18 +140,18 @@ public enum GraphProperty {
 		}
 
 		@Override
-		String serializeData(Object value, int round) {
+		String dataToString(Object value, int round) {
 			return round + " " + value.toString() + "\n";
 		}
 	};
 
 	/**
-	 * Convert data to string for file output
+	 * Convert data to string representation
 	 * 
 	 * @param value
 	 * @param round
 	 */
-	abstract String serializeData(Object value, int round);
+	abstract String dataToString(Object value, int round);
 
 	/**
 	 * Calculate value on single node

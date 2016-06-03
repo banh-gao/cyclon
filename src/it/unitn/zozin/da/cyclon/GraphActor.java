@@ -1,7 +1,6 @@
 package it.unitn.zozin.da.cyclon;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -16,6 +15,9 @@ import it.unitn.zozin.da.cyclon.NodeActor.NodeCalcTask;
 import it.unitn.zozin.da.cyclon.NodeActor.StartRound;
 import scala.collection.JavaConversions;
 
+/**
+ * Actor controlling all the node actors and aggregating measurement data
+ */
 public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateData> {
 
 	enum State {
@@ -242,9 +244,9 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 
 	public static class EndAddNodesMessage {
 
-		final Collection<ActorRef> addedNodes;
+		final Set<ActorRef> addedNodes;
 
-		public EndAddNodesMessage(Collection<ActorRef> addedNodes) {
+		public EndAddNodesMessage(Set<ActorRef> addedNodes) {
 			this.addedNodes = addedNodes;
 		}
 
@@ -258,7 +260,7 @@ public class GraphActor extends AbstractFSM<GraphActor.State, GraphActor.StateDa
 			this.introducers = introducers;
 		}
 
-		public ActorRef getIntroducer(ActorRef ref) {
+		public ActorRef getIntroducerOf(ActorRef ref) {
 			return introducers.get(ref);
 		}
 	}

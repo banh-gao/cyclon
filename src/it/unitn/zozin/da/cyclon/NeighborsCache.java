@@ -1,60 +1,58 @@
 package it.unitn.zozin.da.cyclon;
 
-import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Random;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import akka.actor.ActorRef;
 
-public class NeighborsCache {
+/**
+ * Neighbor cache to support nodes for Cyclon protocol
+ */
+class NeighborsCache {
 
 	private final int MAX_SIZE;
 	private final Random rand;
 
-	private final Set<Neighbor> cache;
+	private final Map<ActorRef, Integer> cache;
 
 	public NeighborsCache(int maxSize) {
 		this.MAX_SIZE = maxSize;
 		this.rand = new Random();
-		cache = new HashSet<Neighbor>(maxSize);
+		cache = new HashMap<>(MAX_SIZE);
 	}
 
+	/**
+	 * Increase age of all entries in cache
+	 */
 	public void increaseNeighborsAge() {
-		for (Neighbor n : cache)
-			n.age += 1;
+		cache.replaceAll((k, v) -> v + 1);
 	}
 
-	public Neighbor getRandomNeighbor() {
-		// FIXME: use faster implementation
-		Iterator<Neighbor> i = cache.iterator();
-		Neighbor n = i.next();
-
-		int v = rand.nextInt(cache.size());
-
-		for (int p = 1; p < v; p++)
-			n = i.next();
-
-		return n;
-	}
-
-	public int addNeighbors(Collection<Neighbor> newEntries) {
-		int added = 0;
-		for (Neighbor n : newEntries) {
-			// Stop when there are no free slots anymore
-			if (freeSlots() == 0)
+	/**
+	 * Add the specied values to free slots
+	 * Excludes duplicated addresses
+	 * 
+	 * @param newEntries
+	 */
+	public void addNeighbors(Map<ActorRef, Integer> newEntries) {
+		for (Entry<ActorRef, Integer> n : newEntries.entrySet()) {
+			// Stop when there are no more free slots
+			if (MAX_SIZE - cache.size() == 0)
 				break;
 
-			// Add only if not already contained in cache
-			if (cache.add(n))
-				added++;
+			cache.putIfAbsent(n.getKey(), n.getValue());
 		}
-		return added;
+	}
+
+	public ActorRef getRandomNeighbor() {
+		return cache.keySet().stream().limit(rand.nextInt(cache.size()) + 1).reduce((f, s) -> s).get();
 	}
 
 	/**
@@ -63,7 +61,7 @@ public class NeighborsCache {
 	 * @param max
 	 * @return The removed neighbors
 	 */
-	public List<Neighbor> removeRandomNeighbors(int max) {
+	public Map<ActorRef, Integer> removeRandomNeighbors(int max) {
 		return removeRandomNeighbors(max, null);
 	}
 
@@ -75,96 +73,41 @@ public class NeighborsCache {
 	 * @param exclude
 	 * @return The removed neighbors
 	 */
-	public List<Neighbor> removeRandomNeighbors(int max, ActorRef exclude) {
+	public Map<ActorRef, Integer> removeRandomNeighbors(int max, ActorRef exclude) {
 		List<Integer> toRemove = IntStream.range(0, cache.size()).boxed().collect(Collectors.toList());
 		Collections.shuffle(toRemove, rand);
-		// FIXME: remove excluded already here
-		toRemove = toRemove.subList(0, Math.min(max, toRemove.size()));
+		// Limit the numbe of elements to be removed to max + 1 (the potentially
+		// excluded element could have been selected)
+		toRemove = toRemove.subList(0, Math.min(max + 1, toRemove.size()));
 
-		List<Neighbor> removed = new ArrayList<Neighbor>();
-		int i = 0;
-		for (Neighbor n : cache)
-			if (toRemove.contains(i++) && (exclude == null || !n.address.equals(exclude)))
-				removed.add(n);
+		Map<ActorRef, Integer> removed = new HashMap<>();
 
-		cache.removeAll(removed);
+		int index = 0;
+		Iterator<Entry<ActorRef, Integer>> i = cache.entrySet().iterator();
+		while (i.hasNext() && removed.size() < max) {
+			Entry<ActorRef, Integer> e = i.next();
+
+			// Remove element with current index from the list of the ones
+			// selected to be removed
+			// If the current index was not present the entry removal is skipped
+			if (!toRemove.remove((Integer) index++))
+				continue;
+
+			// Skip if excluded from removal
+			if (exclude != null && e.equals(exclude))
+				continue;
+
+			removed.put(e.getKey(), e.getValue());
+			i.remove();
+		}
 
 		return removed;
-
 	}
 
-	public Neighbor removeOldestNeighbor() {
-		Neighbor oldest = null;
-
-		for (Neighbor n : cache) {
-			if (oldest == null || n.age > oldest.age) {
-				oldest = n;
-			}
-		}
-
-		cache.remove(oldest);
-
+	public Entry<ActorRef, Integer> removeOldestNeighbor() {
+		Entry<ActorRef, Integer> oldest = cache.entrySet().stream().collect(Collectors.maxBy((e1, e2) -> e1.getValue().compareTo(e2.getValue()))).get();
+		cache.remove(oldest.getKey());
 		return oldest;
-	}
-
-	@Override
-	public String toString() {
-		return "NeighborsCache " + cache;
-	}
-
-	/**
-	 * Neighbor objects equals method compares only the address (This class is
-	 * inconsistent with the Comparable interface specification)
-	 *
-	 */
-	public static class Neighbor implements Cloneable {
-
-		Integer age;
-		final ActorRef address;
-
-		public Neighbor(int age, ActorRef address) {
-			this.age = age;
-			this.address = address;
-		}
-
-		@Override
-		public String toString() {
-			return "(" + age + ", " + address.path().name() + ")";
-		}
-
-		@Override
-		public int hashCode() {
-			final int prime = 31;
-			int result = 1;
-			result = prime * result + ((address == null) ? 0 : address.hashCode());
-			return result;
-		}
-
-		@Override
-		public Neighbor clone() {
-			return new Neighbor(age, address);
-		}
-
-		@Override
-		public boolean equals(Object obj) {
-			if (this == obj)
-				return true;
-			if (obj == null)
-				return false;
-			if (getClass() != obj.getClass())
-				return false;
-			Neighbor other = (Neighbor) obj;
-			if (address == null) {
-				if (other.address != null)
-					return false;
-			} else if (!address.equals(other.address))
-				return false;
-			return true;
-		}
-	}
-
-	public int freeSlots() {
-		return MAX_SIZE - cache.size();
 	}
 
 	public int size() {
@@ -175,7 +118,12 @@ public class NeighborsCache {
 		return MAX_SIZE;
 	}
 
-	public Set<Neighbor> getNeighbors() {
-		return Collections.unmodifiableSet(cache);
+	public Set<ActorRef> getNeighbors() {
+		return Collections.unmodifiableSet(cache.keySet());
+	}
+
+	@Override
+	public String toString() {
+		return "NeighborsCache " + cache;
 	}
 }
